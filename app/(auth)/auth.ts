@@ -1,25 +1,25 @@
+/* app/(auth)/auth.ts */
 import { compare } from 'bcrypt-ts';
 import NextAuth, { type DefaultSession } from 'next-auth';
 import Credentials from 'next-auth/providers/credentials';
-import { createGuestUser, getUser } from '@/lib/db/queries';
+import GoogleProvider from 'next-auth/providers/google';
+
+import { getUser, createUser } from '@/lib/db/queries';
 import { authConfig } from './auth.config';
 import { DUMMY_PASSWORD } from '@/lib/constants';
 import type { DefaultJWT } from 'next-auth/jwt';
 
 export type UserType = 'guest' | 'regular';
 
+/* ------------------------------------------------------------------ */
+/*                                       Type augmentation for NextAuth */
+/* ------------------------------------------------------------------ */
 declare module 'next-auth' {
   interface Session extends DefaultSession {
     user: {
       id: string;
       type: UserType;
     } & DefaultSession['user'];
-  }
-
-  interface User {
-    id?: string;
-    email?: string | null;
-    type: UserType;
   }
 }
 
@@ -30,6 +30,9 @@ declare module 'next-auth/jwt' {
   }
 }
 
+/* ------------------------------------------------------------------ */
+/*                                             NextAuth configuration */
+/* ------------------------------------------------------------------ */
 export const {
   handlers: { GET, POST },
   auth,
@@ -37,55 +40,69 @@ export const {
   signOut,
 } = NextAuth({
   ...authConfig,
+
   providers: [
-    Credentials({
-      credentials: {},
-      async authorize({ email, password }: any) {
-        const users = await getUser(email);
-
-        if (users.length === 0) {
-          await compare(password, DUMMY_PASSWORD);
-          return null;
-        }
-
-        const [user] = users;
-
-        if (!user.password) {
-          await compare(password, DUMMY_PASSWORD);
-          return null;
-        }
-
-        const passwordsMatch = await compare(password, user.password);
-
-        if (!passwordsMatch) return null;
-
-        return { ...user, type: 'regular' };
-      },
+    /* ---- Google OAuth ------------------------------------------------ */
+    GoogleProvider({
+      clientId: process.env.GOOGLE_CLIENT_ID!,
+      clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
     }),
+
+    /* ---- E-mail / password  ----------------------------------------- */
     Credentials({
-      id: 'guest',
-      credentials: {},
-      async authorize() {
-        const [guestUser] = await createGuestUser();
-        return { ...guestUser, type: 'guest' };
+      credentials: {
+        email:    { label: 'Email',    type: 'email' },
+        password: { label: 'Password', type: 'password' },
+      },
+      async authorize({ email, password }: any) {
+        if (!email || !password) return null;
+
+        const [dbUser] = await getUser(email);
+        if (!dbUser) return null;
+
+        const ok = await compare(password, dbUser.password);
+        if (!ok) return null;
+
+        return { id: dbUser.id, email: dbUser.email, type: 'regular' } as any;
       },
     }),
   ],
+
+  /* ---- Callbacks ---------------------------------------------------- */
   callbacks: {
-    async jwt({ token, user }) {
+    /* 1️⃣ Persist our own fields inside the JWT ----------------------- */
+    async jwt({ token, user, account, profile }) {
+      /* Credentials flow puts the user object here. */
       if (user) {
-        token.id = user.id as string;
-        token.type = user.type;
+        token.id   = (user as any).id;
+        token.type = (user as any).type;
+      }
+
+      /* First-time Google login: make sure the user exists in DB. */
+      if (account?.provider === 'google' && profile?.email) {
+        const [dbUser] = await getUser(profile.email);
+
+        /* Upsert */
+        if (!dbUser) {
+          await createUser(profile.email, DUMMY_PASSWORD);
+          const [inserted] = await getUser(profile.email);
+          token.id = inserted?.id;
+        } else {
+          token.id = dbUser.id;
+        }
+
+        token.type = 'regular';
       }
 
       return token;
     },
+
+    /* 2️⃣ Expose custom fields on the client Session object ----------- */
     async session({ session, token }) {
       if (session.user) {
-        session.user.id = token.id;
-        session.user.type = token.type;
+        session.user.id   = token.id as string;
+        session.user.type = token.type as UserType;
       }
-
       return session;
     },
   },
