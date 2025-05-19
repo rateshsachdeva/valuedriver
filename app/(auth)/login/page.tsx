@@ -1,77 +1,56 @@
 'use client';
 
-import Link from 'next/link';
-import { useRouter } from 'next/navigation';
-import { useActionState, useEffect, useState } from 'react';
-import { toast } from '@/components/toast';
+import { signIn } from 'next-auth/react';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardHeader } from '@/components/ui/card';
+import AuthForm from '@/components/auth-form';
 
-import { AuthForm } from '@/components/auth-form';
-import { SubmitButton } from '@/components/submit-button';
-
-import { login, type LoginActionState } from '../actions';
-import { useSession } from 'next-auth/react';
-
-export default function Page() {
-  const router = useRouter();
-
-  const [email, setEmail] = useState('');
-  const [isSuccessful, setIsSuccessful] = useState(false);
-
-  const [state, formAction] = useActionState<LoginActionState, FormData>(
-    login,
-    {
-      status: 'idle',
-    },
-  );
-
-  const { update: updateSession } = useSession();
-
-  useEffect(() => {
-    if (state.status === 'failed') {
-      toast({
-        type: 'error',
-        description: 'Invalid credentials!',
-      });
-    } else if (state.status === 'invalid_data') {
-      toast({
-        type: 'error',
-        description: 'Failed validating your submission!',
-      });
-    } else if (state.status === 'success') {
-      setIsSuccessful(true);
-      updateSession();
-      router.refresh();
-    }
-  }, [state.status]);
-
-  const handleSubmit = (formData: FormData) => {
-    setEmail(formData.get('email') as string);
-    formAction(formData);
-  };
-
+export default function LoginPage() {
   return (
-    <div className="flex h-dvh w-screen items-start pt-12 md:pt-0 md:items-center justify-center bg-background">
-      <div className="w-full max-w-md overflow-hidden rounded-2xl flex flex-col gap-12">
-        <div className="flex flex-col items-center justify-center gap-2 px-4 text-center sm:px-16">
-          <h3 className="text-xl font-semibold dark:text-zinc-50">Sign In</h3>
-          <p className="text-sm text-gray-500 dark:text-zinc-400">
-            Use your email and password to sign in
-          </p>
-        </div>
-        <AuthForm action={handleSubmit} defaultEmail={email}>
-          <SubmitButton isSuccessful={isSuccessful}>Sign in</SubmitButton>
-          <p className="text-center text-sm text-gray-600 mt-4 dark:text-zinc-400">
-            {"Don't have an account? "}
-            <Link
-              href="/register"
-              className="font-semibold text-gray-800 hover:underline dark:text-zinc-200"
+    <main className="flex min-h-screen items-center justify-center bg-muted/40 p-4">
+      <Card className="w-full max-w-md rounded-2xl shadow-xl">
+        <CardHeader>
+          <h1 className="text-center text-2xl font-semibold">
+            Sign in to your account
+          </h1>
+        </CardHeader>
+
+        <CardContent className="flex flex-col gap-6">
+          {/* Google OAuth button */}
+          <Button
+            variant="outline"
+            className="w-full"
+            onClick={() => signIn('google', { callbackUrl: '/' })}
+          >
+            {/* lightweight “G” logo */}
+            <svg
+              aria-hidden="true"
+              className="mr-2 h-5 w-5"
+              viewBox="0 0 24 24"
+              fill="currentColor"
             >
-              Sign up
-            </Link>
-            {' for free.'}
-          </p>
-        </AuthForm>
-      </div>
-    </div>
+              <path d="M21.6 12.227c0-.81-.073-1.593-.21-2.353H12v4.45h5.44a4.655 4.655 0 0 1-2.017 3.056v2.55h3.27c1.915-1.764 3.018-4.36 3.018-7.703Z" />
+              <path d="M12 22c2.7 0 4.96-.893 6.614-2.425l-3.27-2.55c-.905.607-2.067.964-3.344.964-2.569 0-4.746-1.733-5.525-4.067H3.11v2.56A9.999 9.999 0 0 0 12 22Z" />
+              <path d="M6.475 13.922A5.99 5.99 0 0 1 6 12c0-.667.108-1.312.308-1.922V7.518H3.11A10.002 10.002 0 0 0 2 12c0 1.64.393 3.188 1.11 4.482l3.365-2.56Z" />
+              <path d="M12 6.5c1.47 0 2.79.505 3.833 1.496l2.874-2.874C17.0 3.435 14.7 2.5 12 2.5 7.42 2.5 3.55 5.37 2 9.18l3.308 2.56C4.98 9.26 8.18 6.5 12 6.5Z" />
+            </svg>
+            Continue with Google
+          </Button>
+
+          {/* Divider */}
+          <div className="relative">
+            <div className="absolute inset-0 flex items-center">
+              <span className="h-px w-full bg-border" />
+            </div>
+            <span className="relative mx-auto block w-max bg-background px-3 text-sm text-muted-foreground">
+              or
+            </span>
+          </div>
+
+          {/* Email / password form */}
+          <AuthForm />
+        </CardContent>
+      </Card>
+    </main>
   );
 }
