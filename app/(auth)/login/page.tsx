@@ -42,10 +42,6 @@ export default function LoginPage() {
       >
        <div className="flex flex-col items-center pt-6">
         <img src="/logo.svg" alt="Logo" className="h-32 w-auto" />
-        <span className="mt-2 text-sm font-semibold text-primary uppercase tracking-wide">
-          I am your financial analysis and financial due diligence assistant -  I am here to help you with undertanding the indutry you are about to work on.
-          Please share some information on the industry you are working on I will will help you understand the industry value drivers and will also guide you with a list of information required to anlyse the target company.
-        </span>
        </div>
         <CardContent className="space-y-6 p-8">
           {/* Google OAuth button */}
