@@ -100,7 +100,7 @@ export async function POST(request: Request) {
   const messages = appendClientMessage({
   messages: previousMessages.map((m) => ({
     id: m.id,
-    role: m.role,
+    role: m.role as 'user' | 'assistant' | 'system' | 'data',
     content: Array.isArray(m.parts) ? m.parts.join(' ') : String(m.parts),
     name: m.name,
     toolName: m.toolName,
