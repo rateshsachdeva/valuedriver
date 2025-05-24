@@ -57,25 +57,26 @@ export const {
         email: { label: 'Email', type: 'email' },
         password: { label: 'Password', type: 'password' },
       },
-      async authorize(credentials: { email?: string; password?: string } | undefined) {
-        const email = credentials?.email;
-        const password = credentials?.password;
-
+      async authorize(credentials: Partial<Record<string, unknown>>) {
+        const email = credentials.email as string | undefined;
+        const password = credentials.password as string | undefined;
+    
         if (!email || !password) return null;
-
+    
         const [dbUser] = await getUser(email);
         if (!dbUser || !dbUser.password) return null;
-
+    
         const ok = await compare(password, dbUser.password);
         if (!ok) return null;
-
+    
         return {
           id: dbUser.id,
           email: dbUser.email,
           type: 'regular',
         };
       },
-    }), // ✅ COMMA HERE — this was missing!
+    }),
+
 
   ],
 
