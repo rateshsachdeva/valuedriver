@@ -3,7 +3,7 @@ import {
   appendResponseMessages,
   createDataStream,
   smoothStream,
-  streamAssistant,
+  streamText,
 } from 'ai';
 import { auth, type UserType } from '@/app/(auth)/auth';
 import {
@@ -120,21 +120,20 @@ export async function POST(request: Request) {
 
   const stream = createDataStream({
     execute: (dataStream) => {
-      const result = streamAssistant({
-        assistant: myProvider.assistantModel(),
-        thread: { messages },
-        tools: {
-          getWeather,
-          createDocument: createDocument({ session, dataStream }),
-          updateDocument: updateDocument({ session, dataStream }),
-          requestSuggestions: requestSuggestions({ session, dataStream }),
-        },
-        experimental_generateMessageId: generateUUID,
-        experimental_transform: smoothStream({ chunking: 'word' }),
-        onFinish: async ({ response }) => {
-          const assistantId = getTrailingMessageId({
-            messages: response.messages.filter(m => m.role === 'assistant'),
-          });
+          const result = streamText({
+          model: openai.chat({
+            apiKey: process.env.OPENAI_API_KEY!,
+          }),
+          assistant: {
+            id: process.env.OPENAI_ASSISTANT_ID!,
+          },
+          messages,
+          experimental_transform: smoothStream({ chunking: 'word' }),
+          experimental_generateMessageId: generateUUID,
+          onFinish: async ({ response }) => {
+            // Save response message logic (keep yours here)
+          },
+        });
 
           if (!assistantId) return;
 
