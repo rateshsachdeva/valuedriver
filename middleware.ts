@@ -1,59 +1,58 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { getToken } from 'next-auth/jwt';
-import { guestRegex, isDevelopmentEnvironment } from './lib/constants';
+import { isDevelopmentEnvironment } from './lib/constants';   // keep if you still use it
 
 export async function middleware(request: NextRequest) {
-  const { pathname } = request.nextUrl;
+  const { pathname, searchParams } = request.nextUrl;
 
-  /*
-   * Playwright starts the dev server and requires a 200 status to
-   * begin the tests, so this ensures that the tests can start
-   */
+  /*  Allow the Playwright health-check  */
   if (pathname.startsWith('/ping')) {
     return new Response('pong', { status: 200 });
   }
 
+  /*  Let NextAuth internal routes pass through  */
   if (pathname.startsWith('/api/auth')) {
     return NextResponse.next();
   }
 
+  /*  Retrieve session (JWT)  */
   const token = await getToken({
     req: request,
     secret: process.env.AUTH_SECRET,
     secureCookie: !isDevelopmentEnvironment,
   });
 
+  /*  ────────────────────────────────────────────────
+      1. NO SESSION  → redirect to /login
+  ─────────────────────────────────────────────────── */
   if (!token) {
-    const redirectUrl = encodeURIComponent(request.url);
-
+    const callbackUrl = encodeURIComponent(`${pathname}${searchParams}`);
     return NextResponse.redirect(
-      new URL(`/api/auth/guest?redirectUrl=${redirectUrl}`, request.url),
+      new URL(`/login?callbackUrl=${callbackUrl}`, request.url),
     );
   }
 
-  const isGuest = guestRegex.test(token?.email ?? '');
-
-  if (token && !isGuest && ['/login', '/register'].includes(pathname)) {
+  /*  ────────────────────────────────────────────────
+      2. HAS SESSION  → block /login & /register
+  ─────────────────────────────────────────────────── */
+  if (['/login', '/register'].includes(pathname)) {
     return NextResponse.redirect(new URL('/', request.url));
   }
 
   return NextResponse.next();
 }
 
+/*  Protect all routes except:
+    - next static assets
+    - login / register (handled in logic above)
+----------------------------------------------------- */
 export const config = {
   matcher: [
     '/',
-    '/chat/:id',
+    '/chat/:id*',
     '/api/:path*',
     '/login',
     '/register',
-
-    /*
-     * Match all request paths except for the ones starting with:
-     * - _next/static (static files)
-     * - _next/image (image optimization files)
-     * - favicon.ico, sitemap.xml, robots.txt (metadata files)
-     */
     '/((?!_next/static|_next/image|favicon.ico|sitemap.xml|robots.txt).*)',
   ],
 };
