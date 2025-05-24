@@ -40,12 +40,11 @@ export default function LoginPage() {
           border-l-[4px] border-[#D4AF37]
         "
       >
-       <div className="flex justify-center pt-6">
-        <img
-          src="/logo.svg"
-          alt="Logo"
-          className="h-8 w-8"
-        />
+       <div className="flex flex-col items-center pt-6">
+        <img src="/logo.svg" alt="Logo" className="h-12 w-auto" />
+        <span className="mt-2 text-lg font-semibold text-muted-foreground">
+          ValueDriver
+        </span>
       </div>
         <CardContent className="space-y-6 p-8">
           {/* Google OAuth button */}
