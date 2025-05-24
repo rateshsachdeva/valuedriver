@@ -53,6 +53,6 @@ export const config = {
   matcher: [
     // Only run middleware on pages that do NOT match:
     // static files, public assets, known safe paths
-    '/((?!_next/static|_next/image|favicon.ico|sitemap.xml|robots.txt|logo.svg).*)',
+    '/((?!_next/static|_next/image|favicon.ico|sitemap.xml|robots.txt|logo.svg|logo-dark.svg).*)',
   ],
 };
