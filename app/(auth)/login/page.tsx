@@ -41,11 +41,8 @@ export default function LoginPage() {
         "
       >
        <div className="flex flex-col items-center pt-6">
-        <img src="/logo.svg" alt="Logo" className="h-24 w-auto" />
-        <span className="mt-2 text-lg font-semibold text-muted-foreground">
-          ValueDriver
-        </span>
-      </div>
+        <img src="/logo.svg" alt="Logo" className="h-32 w-auto" />
+       </div>
         <CardContent className="space-y-6 p-8">
           {/* Google OAuth button */}
           <Button
