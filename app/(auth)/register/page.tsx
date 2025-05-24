@@ -13,31 +13,25 @@ export default function RegisterPage() {
   const router = useRouter();
   const [submitting, setSubmitting] = useState(false);
 
-  /* -------------------------------------------------------------- */
-  /*  Called by <AuthForm> on submit                                */
-  /* -------------------------------------------------------------- */
   async function handleSubmit(formData: FormData) {
     setSubmitting(true);
 
-    /** 1️⃣  Call your server action that creates the user row.
-     *       The repo already has `register()` in `app/(auth)/actions.ts`.
-     */
+    /* call your existing server action /api/auth/register */
     const res = await fetch('/api/auth/register', {
       method: 'POST',
       body: formData,
     });
-
-    setSubmitting(false);
 
     if (!res.ok) {
       toast({
         type: 'error',
         description: 'Could not create account. Please try again.',
       });
+      setSubmitting(false);
       return;
     }
 
-    /** 2️⃣  Automatically sign the user in, then go to chat */
+    /* auto-signin */
     const { email, password } = Object.fromEntries(formData) as {
       email: string;
       password: string;
@@ -49,24 +43,29 @@ export default function RegisterPage() {
       redirect: false,
     });
 
+    setSubmitting(false);
+
     if (login?.error) {
-      toast({ type: 'error', description: 'Account created; sign-in failed.' });
+      toast({ type: 'error', description: 'Account created; sign-in failed' });
     } else {
       router.replace('/');
     }
   }
 
-  /* -------------------------------------------------------------- */
-  /*                           UI                                   */
-  /* -------------------------------------------------------------- */
   return (
     <main className="flex min-h-screen items-center justify-center bg-background">
-      <Card className="w-full max-w-md">
+      <Card
+        className="
+          w-full max-w-[478px]
+          shadow-md
+          border-l-[4px] border-[#D4AF37]
+        "
+      >
         <CardContent className="space-y-6 p-8">
-          {/* Header */}
-          <h2 className="text-xl font-semibold text-center">Create an account</h2>
+          <h2 className="text-xl font-semibold text-center">
+            Create an account
+          </h2>
 
-          {/* Email / password fields come FROM AuthForm itself – we only pass a button */}
           <AuthForm action={handleSubmit}>
             <Button
               type="submit"
@@ -77,7 +76,6 @@ export default function RegisterPage() {
             </Button>
           </AuthForm>
 
-          {/* Link back to login */}
           <p className="pt-2 text-center text-sm text-muted-foreground">
             Already have an account?{' '}
             <a href="/login" className="underline">
