@@ -120,46 +120,61 @@ export async function POST(request: Request) {
 
   const stream = createDataStream({
      execute: async (dataStream) => {
-          const result = streamText({
-          model: openai.chat({
-            apiKey: process.env.OPENAI_API_KEY!,
-          }),
-          assistant: {
-            id: process.env.OPENAI_ASSISTANT_ID!,
-          },
-          messages,
-          experimental_transform: smoothStream({ chunking: 'word' }),
-          experimental_generateMessageId: generateUUID,
-          onFinish: async ({ response }) => {
-            // Save response message logic (keep yours here)
-          },
-        });
-
-          if (!assistantId) return;
-
-          const [, assistantMessage] = appendResponseMessages({
-            messages: [message],
-            responseMessages: response.messages,
-          });
-
-          await saveMessages({
-            messages: [
-              {
-                id: assistantId,
-                chatId: id,
-                role: assistantMessage.role,
-                parts: assistantMessage.parts,
-                attachments: assistantMessage.experimental_attachments ?? [],
-                createdAt: new Date(),
-              },
-            ],
-          });
+      const result = streamAssistant({
+        model: myProvider.assistantModel(),
+        system: systemPrompt({ selectedChatModel, requestHints }),
+        messages,
+        maxSteps: 5,
+        experimental_activeTools:
+          selectedChatModel === 'chat-model-reasoning'
+            ? []
+            : ['getWeather', 'createDocument', 'updateDocument', 'requestSuggestions'],
+        experimental_transform: smoothStream({ chunking: 'word' }),
+        experimental_generateMessageId: generateUUID,
+        tools: {
+          getWeather,
+          createDocument: createDocument({ session, dataStream }),
+          updateDocument: updateDocument({ session, dataStream }),
+          requestSuggestions: requestSuggestions({ session, dataStream }),
+        },
+        onFinish: async ({ response }) => {
+          if (session.user?.id) {
+            try {
+              const assistantId = getTrailingMessageId({
+                messages: response.messages.filter(m => m.role === 'assistant'),
+              });
+    
+              if (!assistantId) throw new Error('No assistant message found!');
+    
+              const [, assistantMessage] = appendResponseMessages({
+                messages: [message],
+                responseMessages: response.messages,
+              });
+    
+              await saveMessages({
+                messages: [
+                  {
+                    id: assistantId,
+                    chatId: id,
+                    role: assistantMessage.role,
+                    parts: assistantMessage.parts,
+                    attachments: assistantMessage.experimental_attachments ?? [],
+                    createdAt: new Date(),
+                  },
+                ],
+              });
+            } catch (_) {
+              console.error('Failed to save chat');
+            }
+          }
         },
         experimental_telemetry: {
           isEnabled: isProductionEnvironment,
-          functionId: 'stream-assistant',
+          functionId: 'stream-text',
         },
-      });
+      }); // ✅ This closing bracket was probably missing
+
+
 
       result.consumeStream();
       result.mergeIntoDataStream(dataStream, { sendReasoning: true });
