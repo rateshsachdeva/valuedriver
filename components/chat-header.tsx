@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useWindowSize } from 'usehooks-ts';
+import { SidebarUserNav } from '@/components/sidebar-user-nav';
 
 import { ModelSelector } from '@/components/model-selector';
 import { SidebarToggle } from '@/components/sidebar-toggle';
@@ -54,6 +55,23 @@ function PureChatHeader({
           <TooltipContent>New Chat</TooltipContent>
         </Tooltip>
       )}
+          {/* Center: logo */}
+      <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2">
+        <img
+          src="/chatlogo.svg"
+          alt="Logo"
+          className="h-12 w-auto block dark:hidden"
+        />
+        <img
+          src="/chatlogo-dark.svg"
+          alt="Logo"
+          className="h-12 w-auto hidden dark:block"
+        />
+      </div>
+      <div className="ml-auto hidden md:flex items-center gap-3">
+        <SidebarUserNav user={session.user} />
+      </div>
+
     </header>
 
   );
