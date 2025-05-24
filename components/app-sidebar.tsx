@@ -39,18 +39,18 @@ export function AppSidebar({ user }: { user: User | undefined }) {
                 <img
                   src="/logo.svg"
                   alt="Logo"
-                  className="h-6 w-auto block dark:hidden"
+                  className="h-12 w-auto block dark:hidden"
                 />
 
                 {/* Dark mode logo */}
                 <img
                   src="/logo-dark.svg"
                   alt="Logo"
-                  className="h-6 w-auto hidden dark:block"
+                  className="h-12 w-auto hidden dark:block"
                 />
 
                 <span className="text-lg font-semibold px-2 hover:bg-muted rounded-md cursor-pointer">
-                  Chatbot
+                  Understand Key Value drivers
                 </span>
               </div>
             </Link>
