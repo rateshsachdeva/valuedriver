@@ -34,14 +34,25 @@ export function AppSidebar({ user }: { user: User | undefined }) {
               className="flex items-center gap-3"
             >
               {/* brand logo + title */}
-              <img
-                src="/logo.svg"
-                alt="Logo"
-                className="h-6 w-6 shrink-0"
-              />
-              <span className="text-lg font-semibold px-2 hover:bg-muted rounded-md cursor-pointer">
-                Chatbot
-              </span>
+              <div className="flex items-center gap-2">
+                {/* Light mode logo */}
+                <img
+                  src="/logo.svg"
+                  alt="Logo"
+                  className="h-6 w-auto block dark:hidden"
+                />
+
+                {/* Dark mode logo */}
+                <img
+                  src="/logo-dark.svg"
+                  alt="Logo"
+                  className="h-6 w-auto hidden dark:block"
+                />
+
+                <span className="text-lg font-semibold px-2 hover:bg-muted rounded-md cursor-pointer">
+                  Chatbot
+                </span>
+              </div>
             </Link>
 
             {/* new-chat button */}
