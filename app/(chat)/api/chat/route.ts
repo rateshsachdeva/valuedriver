@@ -119,7 +119,7 @@ export async function POST(request: Request) {
   await createStreamId({ streamId, chatId: id });
 
   const stream = createDataStream({
-    execute: (dataStream) => {
+     execute: async (dataStream) => {
           const result = streamText({
           model: openai.chat({
             apiKey: process.env.OPENAI_API_KEY!,
