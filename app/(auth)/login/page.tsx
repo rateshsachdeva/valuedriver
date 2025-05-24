@@ -41,7 +41,7 @@ export default function LoginPage() {
         "
       >
        <div className="flex flex-col items-center pt-6">
-        <img src="/logo.svg" alt="Logo" className="h-12 w-auto" />
+        <img src="/logo.svg" alt="Logo" className="h-24 w-auto" />
         <span className="mt-2 text-lg font-semibold text-muted-foreground">
           ValueDriver
         </span>
