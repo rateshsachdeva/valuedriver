@@ -52,22 +52,23 @@ export const {
     }),
 
     /* ------ E-mail / password --------- */
-    Credentials({
+   Credentials({
       credentials: {
         email: { label: 'Email', type: 'email' },
         password: { label: 'Password', type: 'password' },
       },
-      async authorize({ email, password }): Promise<any | null> {
+      async authorize(credentials: { email?: string; password?: string } | undefined) {
+        const email = credentials?.email;
+        const password = credentials?.password;
+    
         if (!email || !password) return null;
-
+    
         const [dbUser] = await getUser(email);
-
-        // bail if user not found *or* they signed up with Google (password = null)
         if (!dbUser || !dbUser.password) return null;
-
+    
         const ok = await compare(password, dbUser.password);
         if (!ok) return null;
-
+    
         return {
           id: dbUser.id,
           email: dbUser.email,
@@ -75,7 +76,6 @@ export const {
         };
       },
     }),
-  ],
 
   /* ----------------- Callbacks ----------------- */
   callbacks: {
