@@ -1,51 +1,54 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { getToken } from 'next-auth/jwt';
-import { isDevelopmentEnvironment } from './lib/constants';   // keep if you still use it
+import { isDevelopmentEnvironment } from './lib/constants';
 
 export async function middleware(request: NextRequest) {
-  const { pathname, searchParams } = request.nextUrl;
+  const { pathname, search } = request.nextUrl;
 
-  /*  Allow the Playwright health-check  */
+  /* Health-check for Playwright */
   if (pathname.startsWith('/ping')) {
     return new Response('pong', { status: 200 });
   }
 
-  /*  Let NextAuth internal routes pass through  */
+  /* Let NextAuth’s own routes through */
   if (pathname.startsWith('/api/auth')) {
     return NextResponse.next();
   }
 
-  /*  Retrieve session (JWT)  */
+  /* Current session (JWT) */
   const token = await getToken({
     req: request,
     secret: process.env.AUTH_SECRET,
     secureCookie: !isDevelopmentEnvironment,
   });
 
-  /*  ────────────────────────────────────────────────
-      1. NO SESSION  → redirect to /login
-  ─────────────────────────────────────────────────── */
+  /* ──────────────────────────────────────────────
+     1.  NO SESSION
+     ─> allow /login & /register
+     ─> otherwise redirect to /login
+  ─────────────────────────────────────────────── */
   if (!token) {
-    const callbackUrl = encodeURIComponent(`${pathname}${searchParams}`);
+    if (pathname === '/login' || pathname === '/register') {
+      return NextResponse.next();                // stay on the page
+    }
+    const dest = encodeURIComponent(`${pathname}${search}`);
     return NextResponse.redirect(
-      new URL(`/login?callbackUrl=${callbackUrl}`, request.url),
+      new URL(`/login?callbackUrl=${dest}`, request.url),
     );
   }
 
-  /*  ────────────────────────────────────────────────
-      2. HAS SESSION  → block /login & /register
-  ─────────────────────────────────────────────────── */
-  if (['/login', '/register'].includes(pathname)) {
+  /* ──────────────────────────────────────────────
+     2.  HAS SESSION
+     ─> block /login & /register
+  ─────────────────────────────────────────────── */
+  if (pathname === '/login' || pathname === '/register') {
     return NextResponse.redirect(new URL('/', request.url));
   }
 
   return NextResponse.next();
 }
 
-/*  Protect all routes except:
-    - next static assets
-    - login / register (handled in logic above)
------------------------------------------------------ */
+/* Routes to run the middleware on */
 export const config = {
   matcher: [
     '/',
