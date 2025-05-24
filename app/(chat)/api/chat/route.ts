@@ -3,7 +3,7 @@ import {
   appendResponseMessages,
   createDataStream,
   smoothStream,
-  streamText,
+  streamAssistant,
 } from 'ai';
 import { auth, type UserType } from '@/app/(auth)/auth';
 import { type RequestHints, systemPrompt } from '@/lib/ai/prompts';
@@ -18,6 +18,8 @@ import {
   saveMessages,
 } from '@/lib/db/queries';
 import { generateUUID, getTrailingMessageId } from '@/lib/utils';
+import { streamAssistant } from 'ai';
+import { openai } from '@ai-sdk/openai';
 import { generateTitleFromUserMessage } from '../../actions';
 import { createDocument } from '@/lib/ai/tools/create-document';
 import { updateDocument } from '@/lib/ai/tools/update-document';
@@ -146,8 +148,8 @@ export async function POST(request: Request) {
 
     const stream = createDataStream({
       execute: (dataStream) => {
-        const result = streamText({
-          model: myProvider.languageModel(selectedChatModel),
+        const result = streamAssistant({
+          model: myProvider.assistantModel(),
           system: systemPrompt({ selectedChatModel, requestHints }),
           messages,
           maxSteps: 5,
