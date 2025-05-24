@@ -1,6 +1,7 @@
 import { myProvider } from '@/lib/ai/providers';
 import { createDocumentHandler } from '@/lib/artifacts/server';
 import { experimental_generateImage } from 'ai';
+import { openai } from '@ai-sdk/openai';
 
 export const imageDocumentHandler = createDocumentHandler<'image'>({
   kind: 'image',
@@ -8,8 +9,9 @@ export const imageDocumentHandler = createDocumentHandler<'image'>({
     let draftContent = '';
 
     const { image } = await experimental_generateImage({
-      //model: myProvider.imageModel('small-model'),
-      prompt: title,
+      model: openai.image('dall-e-3', {
+        apiKey: process.env.OPENAI_API_KEY!,
+      }),
       n: 1,
     });
 
@@ -26,7 +28,9 @@ export const imageDocumentHandler = createDocumentHandler<'image'>({
     let draftContent = '';
 
     const { image } = await experimental_generateImage({
-      //model: myProvider.imageModel('small-model'),
+      model: openai.image('dall-e-3', {
+        apiKey: process.env.OPENAI_API_KEY!,
+      }),
       prompt: description,
       n: 1,
     });
