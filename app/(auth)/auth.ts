@@ -52,7 +52,7 @@ export const {
     }),
 
     /* ------ E-mail / password --------- */
-   Credentials({
+    Credentials({
       credentials: {
         email: { label: 'Email', type: 'email' },
         password: { label: 'Password', type: 'password' },
@@ -60,34 +60,34 @@ export const {
       async authorize(credentials: { email?: string; password?: string } | undefined) {
         const email = credentials?.email;
         const password = credentials?.password;
-    
+
         if (!email || !password) return null;
-    
+
         const [dbUser] = await getUser(email);
         if (!dbUser || !dbUser.password) return null;
-    
+
         const ok = await compare(password, dbUser.password);
         if (!ok) return null;
-    
+
         return {
           id: dbUser.id,
           email: dbUser.email,
           type: 'regular',
         };
       },
-    }),
+    }), // ✅ COMMA HERE — this was missing!
+
+  ],
 
   /* ----------------- Callbacks ----------------- */
   callbacks: {
     /** Persist our custom fields inside the JWT */
     async jwt({ token, user, account, profile }) {
-      /* credentials flow puts user obj here */
       if (user) {
         token.id = (user as any).id;
         token.type = (user as any).type;
       }
 
-      /* first-time Google login: upsert user row */
       if (account?.provider === 'google' && profile?.email) {
         const email = profile.email;
         const [dbUser] = await getUser(email);
@@ -99,6 +99,7 @@ export const {
         } else {
           token.id = dbUser.id;
         }
+
         token.type = 'regular';
       }
 
