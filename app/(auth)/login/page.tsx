@@ -1,54 +1,87 @@
 'use client';
 
-import { signIn } from 'next-auth/react';
-import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader } from '@/components/ui/card';
+import { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
+import { signIn, useSession } from 'next-auth/react';
+
 import { AuthForm } from '@/components/auth-form';
+import { Card, CardContent } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { toast } from '@/components/toast';
 
-export default function LoginPage() {
+export default function Page() {
+  const router = useRouter();
+  const { update: updateSession } = useSession();
+
+  const [isSuccessful, setIsSuccessful] = useState(false);
+
+  /* -------------------------------- form action -------------------------------- */
+  async function handleSubmit(formData: FormData) {
+    const email = formData.get('email') as string;
+    const password = formData.get('password') as string;
+
+    const res = await signIn('credentials', {
+      email,
+      password,
+      redirect: false,
+    });
+
+    if (res?.error) {
+      toast({ type: 'error', description: 'Invalid credentials!' });
+    } else {
+      setIsSuccessful(true);
+      await updateSession();
+      router.replace('/'); // go to chat
+    }
+  }
+
+  /* -------------------------------- component ---------------------------------- */
   return (
-    <main className="flex min-h-screen items-center justify-center bg-muted/40 p-4">
-      <Card className="w-full max-w-md rounded-2xl shadow-xl">
-        <CardHeader>
-          <h1 className="text-center text-2xl font-semibold">
-            Sign in to your account
-          </h1>
-        </CardHeader>
-
-        <CardContent className="flex flex-col gap-6">
-          {/* Google OAuth button */}
+    <main className="flex min-h-screen items-center justify-center bg-background">
+      <Card className="w-full max-w-md">
+        <CardContent className="space-y-6 p-8">
+          {/* Google button */}
           <Button
             variant="outline"
             className="w-full"
             onClick={() => signIn('google', { callbackUrl: '/' })}
           >
-            {/* lightweight “G” logo */}
-            <svg
-              aria-hidden="true"
-              className="mr-2 h-5 w-5"
-              viewBox="0 0 24 24"
-              fill="currentColor"
-            >
-              <path d="M21.6 12.227c0-.81-.073-1.593-.21-2.353H12v4.45h5.44a4.655 4.655 0 0 1-2.017 3.056v2.55h3.27c1.915-1.764 3.018-4.36 3.018-7.703Z" />
-              <path d="M12 22c2.7 0 4.96-.893 6.614-2.425l-3.27-2.55c-.905.607-2.067.964-3.344.964-2.569 0-4.746-1.733-5.525-4.067H3.11v2.56A9.999 9.999 0 0 0 12 22Z" />
-              <path d="M6.475 13.922A5.99 5.99 0 0 1 6 12c0-.667.108-1.312.308-1.922V7.518H3.11A10.002 10.002 0 0 0 2 12c0 1.64.393 3.188 1.11 4.482l3.365-2.56Z" />
-              <path d="M12 6.5c1.47 0 2.79.505 3.833 1.496l2.874-2.874C17.0 3.435 14.7 2.5 12 2.5 7.42 2.5 3.55 5.37 2 9.18l3.308 2.56C4.98 9.26 8.18 6.5 12 6.5Z" />
+            <svg aria-hidden className="mr-2 h-5 w-5" viewBox="0 0 24 24">
+              <path
+                d="M12 12v4.8h6.8A6.7 6.7 0 0 1 12 19.6 7.6 7.6 0 0 1 4.4 12 7.6 7.6 0 0 1 12 4.4a7.2 7.2 0 0 1 5.1 2l3.6-3.6A12 12 0 0 0 0 12a12 12 0 0 0 12 12c6.9 0 12-5 12-12 0-.8-.1-1.6-.2-2.4H12Z"
+                fill="currentColor"
+              />
             </svg>
             Continue with Google
           </Button>
 
-          {/* Divider */}
-          <div className="relative">
-            <div className="absolute inset-0 flex items-center">
-              <span className="h-px w-full bg-border" />
-            </div>
-            <span className="relative mx-auto block w-max bg-background px-3 text-sm text-muted-foreground">
-              or
-            </span>
+          {/* divider */}
+          <div className="relative flex items-center">
+            <span className="flex-grow border-t border-muted-foreground/20" />
+            <span className="mx-3 text-xs uppercase text-muted-foreground">or</span>
+            <span className="flex-grow border-t border-muted-foreground/20" />
           </div>
 
-          {/* Email / password form */}
-          <AuthForm />
+          {/* email / password */}
+          <AuthForm action={handleSubmit}>
+            <input
+              name="email"
+              type="email"
+              placeholder="you@example.com"
+              required
+              className="w-full rounded-md border p-2 text-sm"
+            />
+            <input
+              name="password"
+              type="password"
+              placeholder="••••••"
+              required
+              className="w-full rounded-md border p-2 text-sm"
+            />
+            <Button type="submit" className="w-full">
+              {isSuccessful ? '✓ Signed in' : 'Sign in'}
+            </Button>
+          </AuthForm>
         </CardContent>
       </Card>
     </main>
