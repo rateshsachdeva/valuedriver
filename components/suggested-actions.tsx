@@ -77,8 +77,7 @@ function PureSuggestedActions({
 // );
 
 return null;
-
-
+}
 export const SuggestedActions = memo(
   PureSuggestedActions,
   (prevProps, nextProps) => {
