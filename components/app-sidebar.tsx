@@ -3,13 +3,12 @@
 import { useState } from 'react';
 import { Menu, ChevronLeft } from 'lucide-react';
 
-import { SidebarConversations } from './sidebar-conversations';
-import { SidebarUserNav } from './sidebar-user-nav';
+import { SidebarConversations } from '@/components/sidebar-conversations';
+import { SidebarUserNav } from '@/components/sidebar-user-nav';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 
 export function AppSidebar() {
-  /* simple collapse / expand */
   const [collapsed, setCollapsed] = useState(false);
 
   return (
@@ -19,7 +18,7 @@ export function AppSidebar() {
         collapsed ? 'w-16' : 'w-64',
       )}
     >
-      {/* ─────────── header ─────────── */}
+      {/* header with logo + collapse toggle */}
       <header className="flex h-12 items-center gap-2 px-4 text-lg font-semibold">
         {!collapsed && (
           <>
@@ -28,7 +27,6 @@ export function AppSidebar() {
           </>
         )}
 
-        {/* collapse toggle */}
         <Button
           variant="ghost"
           size="sm"
@@ -39,14 +37,12 @@ export function AppSidebar() {
         </Button>
       </header>
 
-      {/* ───── conversations list ───── */}
+      {/* conversations list */}
       <div className="flex-1 overflow-y-auto">
-        {/* pass the collapsed flag if SidebarConversations supports it;
-           otherwise just omit the prop */}
         <SidebarConversations collapsed={collapsed} />
       </div>
 
-      {/* ───── user footer nav ───── */}
+      {/* user footer */}
       <div className="border-t p-2">
         <SidebarUserNav />
       </div>
