@@ -27,6 +27,7 @@ import { myProvider } from '@/lib/ai/providers';
 import { entitlementsByUserType } from '@/lib/ai/entitlements';
 import { postRequestBodySchema, type PostRequestBody } from './schema';
 import { geolocation } from '@vercel/functions';
+import { streamAssistant } from 'ai';
 import {
   createResumableStreamContext,
   type ResumableStreamContext,
