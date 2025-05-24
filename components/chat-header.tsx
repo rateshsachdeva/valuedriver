@@ -60,12 +60,12 @@ function PureChatHeader({
         <img
           src="/chatlogo.svg"
           alt="Logo"
-          className="h-12 w-auto block dark:hidden"
+          className="h-auto w-auto block dark:hidden"
         />
         <img
           src="/chatlogo-dark.svg"
           alt="Logo"
-          className="h-12 w-auto hidden dark:block"
+          className="h-auto w-auto hidden dark:block"
         />
       </div>
       <div className="ml-auto hidden md:flex items-center gap-3">
