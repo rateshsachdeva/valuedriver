@@ -40,9 +40,26 @@ export default function LoginPage() {
           border-l-[4px] border-[#D4AF37]
         "
       >
-       <div className="flex flex-col items-center pt-6">
-        <img src="/logo.svg" alt="Logo" className="h-12 w-auto" />
-       </div>
+        <div className="flex flex-col items-center pt-6">
+          {/* Light mode logo */}
+          <img
+            src="/logo.svg"
+            alt="Logo"
+            className="h-12 w-auto block dark:hidden"
+          />
+        
+          {/* Dark mode logo */}
+          <img
+            src="/logo-dark.svg"
+            alt="Logo"
+            className="h-12 w-auto hidden dark:block"
+          />
+        
+          {/* Optional brand name */}
+          <span className="mt-2 text-lg font-semibold text-muted-foreground">
+            ValueDriver
+          </span>
+        </div>
         <CardContent className="space-y-6 p-8">
           {/* Google OAuth button */}
           <Button
