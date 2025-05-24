@@ -98,7 +98,16 @@ export async function POST(request: Request) {
   const previousMessages = await getMessagesByChatId({ id });
 
   const messages = appendClientMessage({
-    messages: previousMessages,
+    messages: previousMessages.map((m) => ({
+      id: m.id,
+      role: m.role,
+      content: m.parts, // assuming parts is the right format; adjust if not
+      name: m.name,
+      toolName: m.toolName,
+      toolInput: m.toolInput,
+      createdAt: m.createdAt,
+      attachments: m.attachments,
+    })),
     message,
   });
 
