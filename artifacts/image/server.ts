@@ -10,7 +10,7 @@ export const imageDocumentHandler = createDocumentHandler<'image'>({
 
     const { image } = await experimental_generateImage({
       model: openai.image('dall-e-3', {
-        apiKey: process.env.OPENAI_API_KEY!,
+      
       }),
       prompt: title,
       n: 1,
@@ -30,7 +30,7 @@ export const imageDocumentHandler = createDocumentHandler<'image'>({
 
     const { image } = await experimental_generateImage({
       model: openai.image('dall-e-3', {
-        apiKey: process.env.OPENAI_API_KEY!,
+     
       }),
       prompt: description,
       n: 1,
