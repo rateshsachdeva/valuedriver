@@ -3,7 +3,7 @@
 import { signIn } from 'next-auth/react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
-import AuthForm from '@/components/auth-form';
+import { AuthForm } from '@/components/auth-form';
 
 export default function LoginPage() {
   return (
