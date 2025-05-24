@@ -1,51 +1,80 @@
 'use client';
 
-import { useState } from 'react';
-import { Menu, ChevronLeft } from 'lucide-react';
+import type { User } from 'next-auth';
+import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 
-import { SidebarConversations } from '@/components/sidebar-conversations';
+import { PlusIcon } from '@/components/icons';
+import { SidebarHistory } from '@/components/sidebar-history';
 import { SidebarUserNav } from '@/components/sidebar-user-nav';
 import { Button } from '@/components/ui/button';
-import { cn } from '@/lib/utils';
+import {
+  Sidebar,
+  SidebarContent,
+  SidebarFooter,
+  SidebarHeader,
+  SidebarMenu,
+  useSidebar,
+} from '@/components/ui/sidebar';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 
-export function AppSidebar() {
-  const [collapsed, setCollapsed] = useState(false);
+export function AppSidebar({ user }: { user: User | undefined }) {
+  const router = useRouter();
+  const { setOpenMobile } = useSidebar();
 
   return (
-    <aside
-      className={cn(
-        'flex h-full flex-col border-r bg-sidebar transition-all duration-300',
-        collapsed ? 'w-16' : 'w-64',
-      )}
-    >
-      {/* header with logo + collapse toggle */}
-      <header className="flex h-12 items-center gap-2 px-4 text-lg font-semibold">
-        {!collapsed && (
-          <>
-            <img src="/logo.svg" alt="Logo" className="h-6 w-6 shrink-0" />
-            ValueDriver
-          </>
-        )}
+    <Sidebar className="group-data-[side=left]:border-r-0">
+      {/* ───────────── header ───────────── */}
+      <SidebarHeader>
+        <SidebarMenu>
+          <div className="flex items-center justify-between">
+            <Link
+              href="/"
+              onClick={() => setOpenMobile(false)}
+              className="flex items-center gap-3"
+            >
+              {/* brand logo + title */}
+              <img
+                src="/logo.svg"
+                alt="Logo"
+                className="h-6 w-6 shrink-0"
+              />
+              <span className="text-lg font-semibold px-2 hover:bg-muted rounded-md cursor-pointer">
+                Chatbot
+              </span>
+            </Link>
 
-        <Button
-          variant="ghost"
-          size="sm"
-          className="ml-auto"
-          onClick={() => setCollapsed((p) => !p)}
-        >
-          {collapsed ? <Menu size={18} /> : <ChevronLeft size={18} />}
-        </Button>
-      </header>
+            {/* new-chat button */}
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  type="button"
+                  className="p-2 h-fit"
+                  onClick={() => {
+                    setOpenMobile(false);
+                    router.push('/');
+                    router.refresh();
+                  }}
+                >
+                  <PlusIcon />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent align="end">New Chat</TooltipContent>
+            </Tooltip>
+          </div>
+        </SidebarMenu>
+      </SidebarHeader>
 
-      {/* conversations list */}
-      <div className="flex-1 overflow-y-auto">
-        <SidebarConversations collapsed={collapsed} />
-      </div>
+      {/* ────────── chat history ────────── */}
+      <SidebarContent>
+        <SidebarHistory user={user} />
+      </SidebarContent>
 
-      {/* user footer */}
-      <div className="border-t p-2">
-        <SidebarUserNav />
-      </div>
-    </aside>
+      {/* ─────────── footer nav ─────────── */}
+      <SidebarFooter>
+        <SidebarUserNav user={user} />
+      </SidebarFooter>
+    </Sidebar>
   );
 }
