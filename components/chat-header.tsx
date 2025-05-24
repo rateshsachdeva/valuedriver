@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useWindowSize } from 'usehooks-ts';
-import { SidebarUserNav } from '@/components/sidebar-user-nav';
+import { HeaderUserNav } from '@/components/header-user-nav';
 
 import { ModelSelector } from '@/components/model-selector';
 import { SidebarToggle } from '@/components/sidebar-toggle';
@@ -68,8 +68,8 @@ function PureChatHeader({
           className="h-36 w-auto hidden dark:block"
         />
       </div>
-      <div className="ml-auto hidden md:flex items-center gap-3">
-        <SidebarUserNav user={session.user} />
+      <div className="ml-auto hidden md:flex items-center gap-4">
+        <HeaderUserNav user={session.user} />
       </div>
 
     </header>
