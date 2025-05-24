@@ -97,19 +97,20 @@ export async function POST(request: Request) {
 
   const previousMessages = await getMessagesByChatId({ id });
 
-  const messages = appendClientMessage({
-  messages: previousMessages.map((m) => ({
-    id: m.id,
-    role: m.role as 'user' | 'assistant' | 'system' | 'data',
-    content: Array.isArray(m.parts) ? m.parts.join(' ') : String(m.parts),
-    name: m.name,
-    toolName: m.toolName,
-    toolInput: m.toolInput,
-    createdAt: m.createdAt,
-    attachments: m.attachments,
-  })),
-  message,
-});
+    const messages = appendClientMessage({
+      messages: previousMessages.map((m) => ({
+        id: m.id,
+        role: m.role as 'user' | 'assistant' | 'system' | 'data',
+        content: Array.isArray(m.parts) ? m.parts.join(' ') : String(m.parts),
+        name: (m as any).name ?? undefined,
+        toolName: (m as any).toolName ?? undefined,
+        toolInput: (m as any).toolInput ?? undefined,
+        createdAt: m.createdAt,
+        attachments: m.attachments,
+      })),
+      message,
+    });
+
 
 
   await saveMessages({
