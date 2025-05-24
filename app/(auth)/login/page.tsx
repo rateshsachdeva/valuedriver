@@ -61,7 +61,15 @@ export default function Page() {
           </div>
 
           {/* Email / password – rendered by AuthForm */}
-          <AuthForm action={handleSubmit} submitting={submitting} />
+          <AuthForm action={handleSubmit}>
+            <Button
+              type="submit"
+              className="w-full"
+              disabled={submitting}
+            >
+              {submitting ? 'Signing in…' : 'Sign in'}
+            </Button>
+          </AuthForm>
         </CardContent>
       </Card>
     </main>
