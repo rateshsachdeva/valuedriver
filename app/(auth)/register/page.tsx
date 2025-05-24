@@ -66,14 +66,14 @@ export default function RegisterPage() {
           <img
             src="/logo.svg"
             alt="Logo"
-            className="h-12 w-auto block dark:hidden"
+            className="h-36 w-auto block dark:hidden"
           />
         
           {/* Dark mode logo */}
           <img
             src="/logo-dark.svg"
             alt="Logo"
-            className="h-12 w-auto hidden dark:block"
+            className="h-36 w-auto hidden dark:block"
           />
         
           {/* Optional brand name */}
