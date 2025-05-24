@@ -26,6 +26,7 @@ const buttonVariants = cva(
         sm: 'h-9 px-3 py-2',
         md: 'h-10 px-4 py-3', // baseline size
         lg: 'h-11 px-6 py-3',
+        icon: 'h-9 w-9 p-2',
       },
     },
     defaultVariants: {
