@@ -1,78 +1,91 @@
 'use client';
 
-import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { useActionState, useEffect, useState } from 'react';
+import { useState } from 'react';
+import { signIn } from 'next-auth/react';
 
 import { AuthForm } from '@/components/auth-form';
-import { SubmitButton } from '@/components/submit-button';
-
-import { register, type RegisterActionState } from '../actions';
+import { Card, CardContent } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
 import { toast } from '@/components/toast';
-import { useSession } from 'next-auth/react';
 
-export default function Page() {
+export default function RegisterPage() {
   const router = useRouter();
+  const [submitting, setSubmitting] = useState(false);
 
-  const [email, setEmail] = useState('');
-  const [isSuccessful, setIsSuccessful] = useState(false);
+  /* -------------------------------------------------------------- */
+  /*  Called by <AuthForm> on submit                                */
+  /* -------------------------------------------------------------- */
+  async function handleSubmit(formData: FormData) {
+    setSubmitting(true);
 
-  const [state, formAction] = useActionState<RegisterActionState, FormData>(
-    register,
-    {
-      status: 'idle',
-    },
-  );
+    /** 1️⃣  Call your server action that creates the user row.
+     *       The repo already has `register()` in `app/(auth)/actions.ts`.
+     */
+    const res = await fetch('/api/auth/register', {
+      method: 'POST',
+      body: formData,
+    });
 
-  const { update: updateSession } = useSession();
+    setSubmitting(false);
 
-  useEffect(() => {
-    if (state.status === 'user_exists') {
-      toast({ type: 'error', description: 'Account already exists!' });
-    } else if (state.status === 'failed') {
-      toast({ type: 'error', description: 'Failed to create account!' });
-    } else if (state.status === 'invalid_data') {
+    if (!res.ok) {
       toast({
         type: 'error',
-        description: 'Failed validating your submission!',
+        description: 'Could not create account. Please try again.',
       });
-    } else if (state.status === 'success') {
-      toast({ type: 'success', description: 'Account created successfully!' });
-
-      setIsSuccessful(true);
-      updateSession();
-      router.refresh();
+      return;
     }
-  }, [state]);
 
-  const handleSubmit = (formData: FormData) => {
-    setEmail(formData.get('email') as string);
-    formAction(formData);
-  };
+    /** 2️⃣  Automatically sign the user in, then go to chat */
+    const { email, password } = Object.fromEntries(formData) as {
+      email: string;
+      password: string;
+    };
 
+    const login = await signIn('credentials', {
+      email,
+      password,
+      redirect: false,
+    });
+
+    if (login?.error) {
+      toast({ type: 'error', description: 'Account created; sign-in failed.' });
+    } else {
+      router.replace('/');
+    }
+  }
+
+  /* -------------------------------------------------------------- */
+  /*                           UI                                   */
+  /* -------------------------------------------------------------- */
   return (
-    <div className="flex h-dvh w-screen items-start pt-12 md:pt-0 md:items-center justify-center bg-background">
-      <div className="w-full max-w-md overflow-hidden rounded-2xl gap-12 flex flex-col">
-        <div className="flex flex-col items-center justify-center gap-2 px-4 text-center sm:px-16">
-          <h3 className="text-xl font-semibold dark:text-zinc-50">Sign Up</h3>
-          <p className="text-sm text-gray-500 dark:text-zinc-400">
-            Create an account with your email and password
-          </p>
-        </div>
-        <AuthForm action={handleSubmit} defaultEmail={email}>
-          <SubmitButton isSuccessful={isSuccessful}>Sign Up</SubmitButton>
-          <p className="text-center text-sm text-gray-600 mt-4 dark:text-zinc-400">
-            {'Already have an account? '}
-            <Link
-              href="/login"
-              className="font-semibold text-gray-800 hover:underline dark:text-zinc-200"
+    <main className="flex min-h-screen items-center justify-center bg-background">
+      <Card className="w-full max-w-md">
+        <CardContent className="space-y-6 p-8">
+          {/* Header */}
+          <h2 className="text-xl font-semibold text-center">Create an account</h2>
+
+          {/* Email / password fields come FROM AuthForm itself – we only pass a button */}
+          <AuthForm action={handleSubmit}>
+            <Button
+              type="submit"
+              className="w-full"
+              disabled={submitting}
             >
+              {submitting ? 'Creating…' : 'Sign up'}
+            </Button>
+          </AuthForm>
+
+          {/* Link back to login */}
+          <p className="pt-2 text-center text-sm text-muted-foreground">
+            Already have an account?{' '}
+            <a href="/login" className="underline">
               Sign in
-            </Link>
-            {' instead.'}
+            </a>
           </p>
-        </AuthForm>
-      </div>
-    </div>
+        </CardContent>
+      </Card>
+    </main>
   );
 }
