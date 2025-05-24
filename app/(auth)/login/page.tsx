@@ -45,14 +45,14 @@ export default function LoginPage() {
           <img
             src="/logo.svg"
             alt="Logo"
-            className="h-24 w-auto block dark:hidden"
+            className="h-auto w-auto block dark:hidden"
           />
         
           {/* Dark mode logo */}
           <img
             src="/logo-dark.svg"
             alt="Logo"
-            className="h-24 w-auto hidden dark:block"
+            className="h-auto w-auto hidden dark:block"
           />
         
           {/* Optional brand name */}
