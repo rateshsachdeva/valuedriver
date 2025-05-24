@@ -3,6 +3,9 @@
 @tailwind utilities;
 
 :root {
+     /* brand colours */
+    --primary: 239 84% 67%;          /* indigo-500 #6366f1 */
+    --primary-foreground: 0 0% 100%;
     --foreground-rgb: 0, 0, 0;
     --background-start-rgb: 214, 219, 220;
     --background-end-rgb: 255, 255, 255;
@@ -65,8 +68,8 @@
         --card-foreground: 0 0% 98%;
         --popover: 240 10% 3.9%;
         --popover-foreground: 0 0% 98%;
-        --primary: 0 0% 98%;
-        --primary-foreground: 240 5.9% 10%;
+        --primary: 239 84% 67%;
+        --primary-foreground: 0 0% 100%;
         --secondary: 240 3.7% 15.9%;
         --secondary-foreground: 0 0% 98%;
         --muted: 240 3.7% 15.9%;
