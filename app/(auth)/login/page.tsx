@@ -9,11 +9,10 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { toast } from '@/components/toast';
 
-export default function Page() {
+export default function LoginPage() {
   const router = useRouter();
   const [submitting, setSubmitting] = useState(false);
 
-  /* runs when the inner form fires “submit” */
   async function handleSubmit(formData: FormData) {
     setSubmitting(true);
 
@@ -34,12 +33,18 @@ export default function Page() {
 
   return (
     <main className="flex min-h-screen items-center justify-center bg-background">
-      <Card className="w-full max-w-md">
+      <Card
+        className="
+          w-full max-w-[478px]
+          shadow-md
+          border-l-[4px] border-[#D4AF37]
+        "
+      >
         <CardContent className="space-y-6 p-8">
           {/* Google OAuth button */}
           <Button
             variant="outline"
-            className="w-full"
+            className="w-full py-3.5"
             onClick={() => signIn('google', { callbackUrl: '/' })}
           >
             <svg
@@ -55,12 +60,14 @@ export default function Page() {
 
           {/* divider */}
           <div className="relative flex items-center">
-            <span className="flex-grow border-t border-muted-foreground/20" />
-            <span className="mx-3 text-xs uppercase text-muted-foreground">or</span>
-            <span className="flex-grow border-t border-muted-foreground/20" />
+            <span className="grow border-t border-muted-foreground/20" />
+            <span className="mx-3 text-xs uppercase text-muted-foreground">
+              or
+            </span>
+            <span className="grow border-t border-muted-foreground/20" />
           </div>
 
-          {/* Email / password – rendered by AuthForm */}
+          {/* Email / password inputs rendered by AuthForm */}
           <AuthForm action={handleSubmit}>
             <Button
               type="submit"
