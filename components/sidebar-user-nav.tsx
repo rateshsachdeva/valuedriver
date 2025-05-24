@@ -1,114 +1,78 @@
 'use client';
 
-import { ChevronUp } from 'lucide-react';
 import Image from 'next/image';
-import type { User } from 'next-auth';
+import { User } from 'next-auth';
 import { signOut, useSession } from 'next-auth/react';
 import { useTheme } from 'next-themes';
-
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
-import {
-  SidebarMenu,
-  SidebarMenuButton,
-  SidebarMenuItem,
-} from '@/components/ui/sidebar';
-import { useRouter } from 'next/navigation';
-import { toast } from './toast';
+import { Moon, Sun, LogOut } from 'lucide-react';
 import { LoaderIcon } from './icons';
-import { guestRegex } from '@/lib/constants';
+import { toast } from './toast';
 
-export function SidebarUserNav({ user }: { user: User }) {
-  const router = useRouter();
-  const { data, status } = useSession();
+export function SidebarUserNav({ user }: { user: User | undefined }) {
+  const { status } = useSession();
   const { setTheme, theme } = useTheme();
 
-  const isGuest = guestRegex.test(data?.user?.email ?? '');
-
   return (
-    <SidebarMenu>
-      <SidebarMenuItem>
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            {status === 'loading' ? (
-              <SidebarMenuButton className="data-[state=open]:bg-sidebar-accent bg-background data-[state=open]:text-sidebar-accent-foreground h-10 justify-between">
-                <div className="flex flex-row gap-2">
-                  <div className="size-6 bg-zinc-500/30 rounded-full animate-pulse" />
-                  <span className="bg-zinc-500/30 text-transparent rounded-md animate-pulse">
-                    Loading auth status
-                  </span>
-                </div>
-                <div className="animate-spin text-zinc-500">
-                  <LoaderIcon />
-                </div>
-              </SidebarMenuButton>
-            ) : (
-              <SidebarMenuButton
-                data-testid="user-nav-button"
-                className="data-[state=open]:bg-sidebar-accent bg-background data-[state=open]:text-sidebar-accent-foreground h-10"
-              >
-                <Image
-                  src={`https://avatar.vercel.sh/${user.email}`}
-                  alt={user.email ?? 'User Avatar'}
-                  width={24}
-                  height={24}
-                  className="rounded-full"
-                />
-                <span data-testid="user-email" className="truncate">
-                  {isGuest ? 'Guest' : user?.email}
-                </span>
-                <ChevronUp className="ml-auto" />
-              </SidebarMenuButton>
-            )}
-          </DropdownMenuTrigger>
-          <DropdownMenuContent
-            data-testid="user-nav-menu"
-            side="top"
-            className="w-[--radix-popper-anchor-width]"
-          >
-            <DropdownMenuItem
-              data-testid="user-nav-item-theme"
-              className="cursor-pointer"
-              onSelect={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
-            >
-              {`Toggle ${theme === 'light' ? 'dark' : 'light'} mode`}
-            </DropdownMenuItem>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem asChild data-testid="user-nav-item-auth">
-              <button
-                type="button"
-                className="w-full cursor-pointer"
-                onClick={() => {
-                  if (status === 'loading') {
-                    toast({
-                      type: 'error',
-                      description:
-                        'Checking authentication status, please try again!',
-                    });
+    <div className="flex flex-col p-2 gap-2 text-sm">
+      {/* avatar + email */}
+      <div className="flex items-center gap-2">
+        {status === 'loading' ? (
+          <>
+            <div className="size-6 bg-zinc-500/30 rounded-full animate-pulse" />
+            <span className="bg-zinc-500/30 text-transparent rounded-md animate-pulse">
+              Loading...
+            </span>
+            <span className="animate-spin ml-auto text-zinc-500">
+              <LoaderIcon size={20} />
+            </span>
+          </>
+        ) : (
+          <>
+            <Image
+              src={`https://avatar.vercel.sh/${user?.email}`}
+              alt={user?.email ?? 'User Avatar'}
+              width={24}
+              height={24}
+              className="rounded-full"
+            />
+            <span className="truncate">{user?.email}</span>
+          </>
+        )}
+      </div>
 
-                    return;
-                  }
+      {/* theme toggle */}
+      <button
+        className="flex items-center gap-2 text-left hover:underline"
+        onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
+      >
+        {theme === 'light' ? (
+          <>
+            <Moon size={16} /> Switch to dark mode
+          </>
+        ) : (
+          <>
+            <Sun size={16} /> Switch to light mode
+          </>
+        )}
+      </button>
 
-                  if (isGuest) {
-                    router.push('/login');
-                  } else {
-                    signOut({
-                      redirectTo: '/',
-                    });
-                  }
-                }}
-              >
-                {isGuest ? 'Login to your account' : 'Sign out'}
-              </button>
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-      </SidebarMenuItem>
-    </SidebarMenu>
+      {/* sign-out */}
+      <button
+        className="flex items-center gap-2 text-left hover:underline"
+        onClick={async () => {
+          if (status === 'loading') {
+            toast({
+              type: 'error',
+              description:
+                'Checking authentication status, please try again!',
+            });
+            return;
+          }
+          await signOut({ callbackUrl: '/login' });
+        }}
+      >
+        <LogOut size={16} /> Sign out
+      </button>
+    </div>
   );
 }
