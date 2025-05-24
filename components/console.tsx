@@ -105,7 +105,7 @@ export function Console({ consoleOutputs, setConsoleOutputs }: ConsoleProps) {
           <Button
             variant="ghost"
             className="size-fit p-1 hover:dark:bg-zinc-700 hover:bg-zinc-200"
-            size="icon"
+            size="md"
             onClick={() => setConsoleOutputs([])}
           >
             <CrossSmallIcon />
