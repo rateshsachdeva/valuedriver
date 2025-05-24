@@ -12,7 +12,8 @@ export const imageDocumentHandler = createDocumentHandler<'image'>({
       model: openai.image('dall-e-3', {
         apiKey: process.env.OPENAI_API_KEY!,
       }),
-       prompt: title,,
+      prompt: title,
+      n: 1,
     });
 
     draftContent = image.base64;
