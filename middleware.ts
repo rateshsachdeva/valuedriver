@@ -51,11 +51,8 @@ export async function middleware(request: NextRequest) {
 /* Routes to run the middleware on */
 export const config = {
   matcher: [
-    '/',
-    '/chat/:id*',
-    '/api/:path*',
-    '/login',
-    '/register',
+    // Only run middleware on pages that do NOT match:
+    // static files, public assets, known safe paths
     '/((?!_next/static|_next/image|favicon.ico|sitemap.xml|robots.txt|logo.svg).*)',
   ],
 };
