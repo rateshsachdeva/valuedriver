@@ -8,7 +8,7 @@ import {
   type UIMessage,
   type Message as SDKMessage,
 } from 'ai';
-import { streamAssistant } from '@ai-sdk/openai';
+import { openai } from '@ai-sdk/openai';
 import { auth, type UserType } from '@/app/(auth)/auth';
 import {
   createStreamId,
@@ -212,7 +212,7 @@ await saveChat({
     execute: async (dataStream) => {
       /* ---- inside the execute: async (dataStream) => { … } block ---- */
       
-const result = await streamAssistant({
+const result = await (openai as any).experimental.streamAssistant({
   assistantId: process.env.OPENAI_ASSISTANT_ID!,
   instructions: systemPrompt({ selectedChatModel, requestHints }),
   messages: sdkMsgs,
