@@ -21,7 +21,7 @@ import {
   saveMessages,
 } from '@/lib/db/queries';
 import { generateUUID } from '@/lib/utils';
-import { generateTitleFromUserMessage } from '../../actions';
+
 
 import { createDocument } from '@/lib/ai/tools/create-document';
 import { updateDocument } from '@/lib/ai/tools/update-document';
@@ -166,12 +166,20 @@ export async function POST(request: Request) {
   /* 2 ▸ chat row --------------------------------------------------- */
   const chat = await getChatById({ id: chatId });
   if (!chat) {
-    await saveChat({
-      id: chatId,
-      userId: session.user.id,
-      title: await generateTitleFromUserMessage({ message: incoming }),
-      visibility: selectedVisibilityType,
-    });
+// Title = first 80-char slice of the user’s opening message
+const firstUserText = Array.isArray(incoming.parts)
+  ? incoming.parts
+      .filter(p => p.type === 'text')
+      .map(p => (p as any).text)
+      .join(' ')
+  : (incoming.content as string);
+
+await saveChat({
+  id: chatId,
+  userId: session.user.id,
+  title: firstUserText.slice(0, 80) || 'Untitled chat',
+  visibility: selectedVisibilityType,
+});
   } else if (chat.userId !== session.user.id) {
     return new ChatSDKError('forbidden:chat').toResponse();
   }
