@@ -21,7 +21,8 @@ import {
   saveMessages,
 } from '@/lib/db/queries';
 import { generateUUID } from '@/lib/utils';
-import { streamAssistant } from 'ai';
+import { streamAssistant } from 'ai/stream';
+
 
 import { createDocument } from '@/lib/ai/tools/create-document';
 import { updateDocument } from '@/lib/ai/tools/update-document';
