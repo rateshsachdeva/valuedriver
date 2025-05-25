@@ -110,7 +110,7 @@ function toSDKMessages(
         });
         break;
       default:
-        console.warn(Skipping unknown role “${db.role}” (id ${db.id}));
+        console.warn(`Skipping unknown role "${db.role}" (id ${db.id})`);
     }
   });
 
@@ -245,7 +245,7 @@ await saveChat({
       result.mergeIntoDataStream(dataStream as any, { sendReasoning: true });
     },
     onError: (e) =>
-      stream failed: ${e instanceof Error ? e.message : 'unknown'},
+      `stream failed: ${e instanceof Error ? e.message : 'unknown'}`,
   });
 
   /* 5 ▸ resumable handling ---------------------------------------- */
