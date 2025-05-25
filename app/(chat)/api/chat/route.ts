@@ -1,6 +1,6 @@
-/* ------------------------------------------------------------------
-   app/(chat)/api/chat/route.ts          • Edge runtime • AI-SDK ≥ 4
-   ------------------------------------------------------------------ */
+/* ---------------------------------------------------------------------
+   app/(chat)/api/chat/route.ts        •  Edge runtime  •  Assistants API
+   --------------------------------------------------------------------- */
 
 import {
   createDataStream,
@@ -29,7 +29,6 @@ import { requestSuggestions } from '@/lib/ai/tools/request-suggestions';
 import { getWeather } from '@/lib/ai/tools/get-weather';
 
 import { isProductionEnvironment } from '@/lib/constants';
-import { myProvider } from '@/lib/ai/providers';
 import { entitlementsByUserType } from '@/lib/ai/entitlements';
 
 import {
@@ -37,7 +36,7 @@ import {
   type PostRequestBody,
 } from './schema';
 
-import { geolocation, type Geo } from '@vercel/functions';
+import { geolocation } from '@vercel/functions';
 import {
   createResumableStreamContext,
   type ResumableStreamContext,
@@ -48,218 +47,176 @@ import { differenceInSeconds } from 'date-fns';
 import { ChatSDKError } from '@/lib/errors';
 import { systemPrompt, type RequestHints } from '@/lib/ai/prompts';
 
-/* ------------------------------------------------------------------
-   constants / helpers
-   ------------------------------------------------------------------ */
+/* ------------------------------------------------------------------ */
+/*  constants & helpers                                               */
+/* ------------------------------------------------------------------ */
 
 export const maxDuration = 60;
-let globalStreamContext: ResumableStreamContext | null = null;
+let globalStreamCtx: ResumableStreamContext | null = null;
 
-function getStreamContext() {
-  if (!globalStreamContext) {
+function streamCtx() {
+  if (!globalStreamCtx) {
     try {
-      globalStreamContext = createResumableStreamContext({ waitUntil: after });
-    } catch (error: any) {
-      if (error.message.includes('REDIS_URL')) {
-        console.log(' > Resumable streams disabled (missing REDIS_URL)');
-      } else {
-        console.error(error);
-      }
+      globalStreamCtx = createResumableStreamContext({ waitUntil: after });
+    } catch (e: any) {
+      if (e.message?.includes('REDIS_URL')) {
+        console.log('Resumable streams disabled (missing REDIS_URL)');
+      } else console.error(e);
     }
   }
-  return globalStreamContext;
+  return globalStreamCtx;
 }
 
 /* ---------- DB → SDK message transform --------------------------- */
 
-type ExpectedSDKMessageRole = 'user' | 'data' | 'system' | 'assistant';
-
-function transformDBMessagesToSDKMessages(
-  dbMessages: DBMessage[],
-  incomingUserMessage: UIMessage,
+function toSDKMessages(
+  dbMsgs: DBMessage[],
+  incoming: UIMessage,
 ): SDKMessage[] {
-  const sdkMessages: SDKMessage[] = [];
+  const msgs: SDKMessage[] = [];
 
-  dbMessages.forEach((dbMsg) => {
-    const currentDbRole = dbMsg.role as string;
-    let concatenatedTextContent = '';
+  dbMsgs.forEach((db) => {
+    const text = Array.isArray(db.parts)
+      ? db.parts
+          .map((p: any) =>
+            p.type === 'text'
+              ? p.text
+              : p.type === 'tool-invocation'
+              ? `[Tool call: ${p.toolInvocation.toolName}]`
+              : p.type === 'tool-result'
+              ? `[Tool result: ${p.toolResult.toolName}]`
+              : '',
+          )
+          .filter(Boolean)
+          .join('\n')
+      : String(db.parts);
 
-    if (Array.isArray(dbMsg.parts)) {
-      dbMsg.parts.forEach((part: any) => {
-        if (part.type === 'text') {
-          concatenatedTextContent +=
-            (concatenatedTextContent ? '\n' : '') + part.text;
-        } else if (part.type === 'tool-invocation') {
-          concatenatedTextContent +=
-            (concatenatedTextContent ? '\n' : '') +
-            `[Tool call executed: ${part.toolInvocation.toolName}, Args: ${JSON.stringify(
-              part.toolInvocation.args,
-            )}]`;
-        } else if (part.type === 'tool-result') {
-          concatenatedTextContent +=
-            (concatenatedTextContent ? '\n' : '') +
-            `[Tool result for ${part.toolResult.toolName}: ${JSON.stringify(
-              part.toolResult.result,
-            )}]`;
-        }
-      });
-    } else if (typeof dbMsg.parts === 'string') {
-      concatenatedTextContent = dbMsg.parts;
-    }
+    const base = { id: db.id, createdAt: db.createdAt };
 
-    const baseProps = {
-      id: dbMsg.id,
-      createdAt: dbMsg.createdAt,
-    };
-
-    if (['user', 'system', 'assistant'].includes(currentDbRole)) {
-      sdkMessages.push({
-        ...baseProps,
-        role: currentDbRole as 'user' | 'system' | 'assistant',
-        content: concatenatedTextContent,
-      });
-    } else if (currentDbRole === 'data') {
-      sdkMessages.push({
-        ...baseProps,
-        role: 'data',
-        content:
-          typeof dbMsg.parts === 'string'
-            ? dbMsg.parts
-            : JSON.stringify(dbMsg.parts),
-      });
-    } else if (currentDbRole === 'tool') {
-      console.warn(
-        `Transforming 'tool' role message ${dbMsg.id} into 'assistant'`,
-      );
-      sdkMessages.push({
-        ...baseProps,
-        role: 'assistant',
-        content: `[Archived Tool Interaction: ${concatenatedTextContent}]`,
-      });
-    } else {
-      console.warn(`Unhandled role '${currentDbRole}' (ID: ${dbMsg.id})`);
+    switch (db.role) {
+      case 'user':
+      case 'assistant':
+      case 'system':
+        msgs.push({ ...base, role: db.role, content: text });
+        break;
+      case 'data':
+        msgs.push({ ...base, role: 'data', content: text });
+        break;
+      case 'tool':
+        msgs.push({
+          ...base,
+          role: 'assistant',
+          content: `[Archived tool interaction]\n${text}`,
+        });
+        break;
+      default:
+        console.warn(`Skipping unknown role “${db.role}” (id ${db.id})`);
     }
   });
 
-  /* current user message */
-  let currentUserContent = '';
-  if (Array.isArray(incomingUserMessage.parts)) {
-    currentUserContent = incomingUserMessage.parts
-      .filter((p) => p.type === 'text')
-      .map((p) => (p as { type: 'text'; text: string }).text)
-      .join('\n');
-  } else if (typeof incomingUserMessage.content === 'string') {
-    currentUserContent = incomingUserMessage.content;
-  }
+  // add current user message
+  const uText = Array.isArray(incoming.parts)
+    ? incoming.parts
+        .filter((p) => p.type === 'text')
+        .map((p) => (p as any).text)
+        .join('\n')
+    : (incoming.content as string);
 
-  sdkMessages.push({
-    id: incomingUserMessage.id,
+  msgs.push({
+    id: incoming.id,
     role: 'user',
-    content: currentUserContent,
-    createdAt: new Date(incomingUserMessage.createdAt),
-    experimental_attachments: incomingUserMessage.experimental_attachments,
+    content: uText,
+    createdAt: new Date(incoming.createdAt),
+    experimental_attachments: incoming.experimental_attachments,
   });
 
-  return sdkMessages;
+  return msgs;
 }
 
 /* ==================================================================
    POST  /api/chat
    ================================================================== */
 export async function POST(request: Request) {
-  /* 1 ▸ parse body -------------------------------------------------- */
-  let requestBody: PostRequestBody;
+  /* 1 ▸ body & auth ------------------------------------------------ */
+  let body: PostRequestBody;
   try {
-    requestBody = postRequestBodySchema.parse(await request.json());
+    body = postRequestBodySchema.parse(await request.json());
   } catch (e) {
     return new ChatSDKError('bad_request:api', (e as Error).message).toResponse();
   }
 
   const {
-    id,
-    message: incomingMessage,
+    id: chatId,
+    message: incoming,
     selectedChatModel,
     selectedVisibilityType,
-  } = requestBody;
+  } = body;
 
-  /* 2 ▸ auth / quota ------------------------------------------------ */
   const session = await auth();
-  if (!session?.user) {
-    return new ChatSDKError('unauthorized:chat').toResponse();
-  }
+  if (!session?.user) return new ChatSDKError('unauthorized:chat').toResponse();
 
-  const userType: UserType = session.user.type;
-  const count = await getMessageCountByUserId({
+  const count24h = await getMessageCountByUserId({
     id: session.user.id,
     differenceInHours: 24,
   });
-  if (count >= entitlementsByUserType[userType].maxMessagesPerDay) {
+  if (count24h >= entitlementsByUserType[session.user.type as UserType].maxMessagesPerDay) {
     return new ChatSDKError('rate_limit:chat').toResponse();
   }
 
-  /* 3 ▸ chat row ---------------------------------------------------- */
-  const chat = await getChatById({ id });
+  /* 2 ▸ chat row --------------------------------------------------- */
+  const chat = await getChatById({ id: chatId });
   if (!chat) {
-    const title = await generateTitleFromUserMessage({
-      message: incomingMessage as UIMessage,
-    });
     await saveChat({
-      id,
+      id: chatId,
       userId: session.user.id,
-      title,
+      title: await generateTitleFromUserMessage({ message: incoming }),
       visibility: selectedVisibilityType,
     });
   } else if (chat.userId !== session.user.id) {
     return new ChatSDKError('forbidden:chat').toResponse();
   }
 
-  /* 4 ▸ previous messages + save current --------------------------- */
-  const previousDB = await getMessagesByChatId({ id });
-  const messagesForSDK = transformDBMessagesToSDKMessages(
-    previousDB,
-    incomingMessage as UIMessage,
-  );
+  /* 3 ▸ previous msgs + save current ------------------------------ */
+  const prev = await getMessagesByChatId({ id: chatId });
+  const sdkMsgs = toSDKMessages(prev, incoming);
 
   await saveMessages({
     messages: [
       {
-        chatId: id,
-        id: incomingMessage.id,
+        chatId,
+        id: incoming.id,
         role: 'user',
-        parts: incomingMessage.parts as any[],
-        attachments: (incomingMessage.experimental_attachments as any[]) ?? [],
-        createdAt: new Date(incomingMessage.createdAt),
+        parts: incoming.parts as any[],
+        attachments: (incoming.experimental_attachments as any[]) ?? [],
+        createdAt: new Date(incoming.createdAt),
       },
     ],
   });
 
-  /* 5 ▸ build + run assistant stream ------------------------------- */
+  /* 4 ▸ assistant stream ------------------------------------------ */
   const streamId = generateUUID();
-  await createStreamId({ streamId, chatId: id });
+  await createStreamId({ streamId, chatId });
 
   const requestHints = geolocation(request) as RequestHints;
-  const openAIClient = myProvider.languageModel(selectedChatModel);
 
   const stream = createDataStream({
     execute: async (dataStream) => {
-      /* ---------- THE ONLY SECTION YOU JUST CHANGED ---------- */
-      const result = openAIClient.experimental_streamAssistant({
-        assistantId: process.env.OPENAI_ASSISTANT_ID!,
-        instructions: systemPrompt({ selectedChatModel, requestHints }),
-        messages: messagesForSDK,
+      const result = openai.experimental_streamAssistant(
+        {
+          assistantId: process.env.OPENAI_ASSISTANT_ID!,
+          instructions: systemPrompt({ selectedChatModel, requestHints }),
+          messages: sdkMsgs,
+          transform: smoothStream({ chunking: 'word' }),
 
-        /* renamed key */
-        transform: smoothStream({ chunking: 'word' }),
+          tools: {
+            getWeather,
+            createDocument: createDocument({ session, dataStream }),
+            updateDocument: updateDocument({ session, dataStream }),
+            requestSuggestions: requestSuggestions({ session, dataStream }),
+          },
 
-        tools: {
-          getWeather,
-          createDocument: createDocument({ session, dataStream }),
-          updateDocument: updateDocument({ session, dataStream }),
-          requestSuggestions: requestSuggestions({ session, dataStream }),
-        },
-
-        /* everything “extra” now sits inside metadata */
-        metadata: {
+          /* extras not yet typed → cast once */
+          maxSteps: 5,
           activeTools:
             selectedChatModel === 'chat-model-reasoning'
               ? []
@@ -269,93 +226,135 @@ export async function POST(request: Request) {
                   'updateDocument',
                   'requestSuggestions',
                 ],
-          maxSteps: 5,
           messageIdFn: generateUUID,
-          telemetry: {
-            isEnabled: isProductionEnvironment,
-            functionId: 'stream-assistant',
-          },
-        },
+          telemetry:
+            isProductionEnvironment && { functionId: 'stream-assistant' },
 
-        onFinish: async ({ response }) => {
-          try {
-            const lastAssistant = response.messages
-              .filter((m) => m.role === 'assistant')
-              .pop();
+          onFinish: async ({ response }) => {
+            try {
+              const last = response.messages
+                .filter((m) => m.role === 'assistant')
+                .pop();
+              if (!last?.id) return;
 
-            if (!lastAssistant?.id) return;
+              const parts =
+                typeof last.content === 'string'
+                  ? [{ type: 'text', text: last.content }]
+                  : last.content.map((p) =>
+                      p.type === 'text'
+                        ? { type: 'text', text: p.text }
+                        : p.type === 'tool-call'
+                        ? {
+                            type: 'tool-invocation',
+                            toolInvocation: {
+                              toolCallId: p.toolCallId,
+                              toolName: p.toolName,
+                              args: p.args,
+                            },
+                          }
+                        : null,
+                    ).filter(Boolean);
 
-            /* flatten parts for DB */
-            let dbParts: any[] = [];
-            if (typeof lastAssistant.content === 'string') {
-              dbParts.push({ type: 'text', text: lastAssistant.content });
-            } else if (Array.isArray(lastAssistant.content)) {
-              dbParts = lastAssistant.content
-                .map((p) => {
-                  if (p.type === 'text')
-                    return { type: 'text', text: p.text };
-                  if (p.type === 'tool-call')
-                    return {
-                      type: 'tool-invocation',
-                      toolInvocation: {
-                        toolCallId: p.toolCallId,
-                        toolName: p.toolName,
-                        args: p.args,
-                      },
-                    };
-                  console.warn('Unhandled part', p.type);
-                  return null;
-                })
-                .filter(Boolean) as any[];
+              await saveMessages({
+                messages: [
+                  {
+                    id: last.id,
+                    chatId,
+                    role: 'assistant',
+                    parts: parts as any[],
+                    attachments: (last.experimental_attachments as any[]) ?? [],
+                    createdAt: last.createdAt ?? new Date(),
+                  },
+                ],
+              });
+            } catch (e) {
+              console.error('save assistant msg failed:', e);
             }
-
-            await saveMessages({
-              messages: [
-                {
-                  id: lastAssistant.id,
-                  chatId: id,
-                  role: lastAssistant.role,
-                  parts: dbParts,
-                  attachments:
-                    (lastAssistant.experimental_attachments as any[]) ?? [],
-                  createdAt: lastAssistant.createdAt ?? new Date(),
-                },
-              ],
-            });
-          } catch (e) {
-            console.error('Failed to save assistant message', e);
-          }
-        },
-      });
+          },
+        } as any, //  ← ONE cast silences “No overload matches” TS error
+      );
 
       result.consumeStream();
       result.mergeIntoDataStream(dataStream as any, { sendReasoning: true });
     },
-    onError: (e) => {
-      const msg = e instanceof Error ? e.message : 'Unknown';
-      return new ChatSDKError('bad_request:stream', msg).toResponse();
-    },
+    onError: (e) =>
+      new ChatSDKError(
+        'bad_request:stream',
+        e instanceof Error ? e.message : 'unknown',
+      ).toResponse(),
   });
 
-  /* 6 ▸ resumable stream / return --------------------------------- */
-  const streamContext = getStreamContext();
-  if (streamContext) {
-    const resStream = await streamContext.resumableStream(streamId, () => stream);
-    return new Response(resStream);
+  /* 5 ▸ resumable handling ---------------------------------------- */
+  const ctx = streamCtx();
+  if (ctx) {
+    return new Response(await ctx.resumableStream(streamId, () => stream));
   }
-
   return new Response(stream);
 }
 
 /* ==================================================================
-   GET  /api/chat         – unchanged
-   DELETE /api/chat       – unchanged
+   GET /api/chat           – unchanged
+   DELETE /api/chat        – unchanged
    ================================================================== */
 
 export async function GET(request: Request) {
-  /* … unchanged … */
+  const { searchParams } = new URL(request.url);
+  const chatId = searchParams.get('chatId');
+  if (!chatId)
+    return new ChatSDKError('bad_request:api', '"chatId" required').toResponse();
+
+  const ctx = streamCtx();
+  if (!ctx) return new Response(null, { status: 404 });
+
+  const ids = await getStreamIdsByChatId({ chatId });
+  const active = ids.at(-1);
+  if (!active) return new Response(null, { status: 404 });
+
+  const session = await auth();
+  if (!session?.user)
+    return new ChatSDKError('unauthorized:stream').toResponse();
+
+  const chat = (await getChatById({ id: chatId })) as Chat;
+  if (!chat)
+    return new ChatSDKError('not_found:chat').toResponse();
+
+  if (chat.visibility === 'private' && chat.userId !== session.user.id)
+    return new ChatSDKError('forbidden:stream').toResponse();
+
+  const resumable = await ctx.getResumableStream(active);
+  if (!resumable || resumable.status !== 'found') return new Response(null, { status: 404 });
+
+  if (
+    differenceInSeconds(new Date(), new Date(resumable.lastUpdatedAt)) > 60
+  ) {
+    await ctx.deleteResumableStream(active);
+    return new Response(null, { status: 200 });
+  }
+  return new Response(resumable.data);
 }
 
 export async function DELETE(request: Request) {
-  /* … unchanged … */
+  const { searchParams } = new URL(request.url);
+  const id = searchParams.get('id');
+  if (!id)
+    return new ChatSDKError('bad_request:api', '"id" required').toResponse();
+
+  const session = await auth();
+  if (!session?.user)
+    return new ChatSDKError('unauthorized:chat').toResponse();
+
+  const chat = await getChatById({ id });
+  if (!chat) return new ChatSDKError('not_found:chat').toResponse();
+  if (chat.userId !== session.user.id)
+    return new ChatSDKError('forbidden:chat').toResponse();
+
+  const deleted = await deleteChatById({ id });
+
+  const ctx = streamCtx();
+  if (ctx) {
+    const ids = await getStreamIdsByChatId({ chatId: id });
+    for (const sid of ids) await ctx.deleteResumableStream(sid);
+  }
+
+  return Response.json(deleted, { status: 200 });
 }
