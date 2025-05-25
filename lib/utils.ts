@@ -23,11 +23,22 @@ export async function fetchWithErrorHandlers(
   input: RequestInfo | URL,
   init?: RequestInit,
 ) {
+  // ✅ Log the outgoing request and body to debug API calls
+  console.log("🔍 [fetchWithErrorHandlers] Sending request to:", input);
+  if (init?.body) {
+    try {
+      console.log("📦 Request Body:", JSON.parse(init.body.toString()));
+    } catch {
+      console.log("📦 Request Body (raw):", init.body);
+    }
+  }
+
   try {
     const response = await fetch(input, init);
 
     if (!response.ok) {
       const { code, cause } = await response.json();
+      console.error("❌ Response not OK:", code, cause);
       throw new ChatSDKError(code as ErrorCode, cause);
     }
 
@@ -37,6 +48,7 @@ export async function fetchWithErrorHandlers(
       throw new ChatSDKError('offline:chat');
     }
 
+    console.error("❌ fetchWithErrorHandlers caught error:", error);
     throw error;
   }
 }
@@ -80,9 +92,7 @@ export function getTrailingMessageId({
   messages: Array<ResponseMessage>;
 }): string | null {
   const trailingMessage = messages.at(-1);
-
   if (!trailingMessage) return null;
-
   return trailingMessage.id;
 }
 
