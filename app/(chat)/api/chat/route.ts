@@ -126,7 +126,7 @@ function toSDKMessages(
     id: incoming.id,
     role: 'user',
     content: uText,
-    createdAt: new Date(incoming.createdAt),
+    createdAt: new Date(incoming.createdAt ?? Date.now()),
     experimental_attachments: incoming.experimental_attachments,
   });
 
@@ -188,7 +188,7 @@ export async function POST(request: Request) {
         role: 'user',
         parts: incoming.parts as any[],
         attachments: (incoming.experimental_attachments as any[]) ?? [],
-        createdAt: new Date(incoming.createdAt),
+        createdAt: new Date(incoming.createdAt ?? Date.now()),
       },
     ],
   });
