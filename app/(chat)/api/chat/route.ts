@@ -234,7 +234,7 @@ const result = await (openai as any).experimental.streamAssistant({
   messageIdFn: generateUUID,
   telemetry: isProductionEnvironment && { functionId: 'stream-assistant' },
 
-  onFinish: async ({ response }) => {
+  onFinish: async ({ response }: { response: any }) => {
     // Optional: save assistant response to DB
   },
 });
