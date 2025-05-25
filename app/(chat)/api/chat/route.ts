@@ -277,13 +277,13 @@ export async function GET(request: Request) {
   if (chat.visibility === 'private' && chat.userId !== session.user.id)
     return new ChatSDKError('forbidden:stream').toResponse();
 
-  const resumable = await ctx.getResumableStream(active);
+  const resumable = await (ctx as any).getResumableStream(active);
   if (!resumable || resumable.status !== 'found') return new Response(null, { status: 404 });
 
   if (
     differenceInSeconds(new Date(), new Date(resumable.lastUpdatedAt)) > 60
   ) {
-    await ctx.deleteResumableStream(active);
+    await (ctx as any).deleteResumableStream(active);
     return new Response(null, { status: 200 });
   }
   return new Response(resumable.data);
@@ -309,7 +309,7 @@ export async function DELETE(request: Request) {
   const ctx = streamCtx();
   if (ctx) {
     const ids = await getStreamIdsByChatId({ chatId: id });
-    for (const sid of ids) await ctx.deleteResumableStream(sid);
+    for (const sid of ids) await (ctx as any).deleteResumableStream(sid);
   }
 
   return Response.json(deleted, { status: 200 });
