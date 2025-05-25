@@ -1,4 +1,3 @@
-// app/(chat)/api/chat/route.ts
 import {
   appendClientMessage,
   appendResponseMessages,
@@ -8,57 +7,110 @@ import {
   type UIMessage,
   type Message as SDKMessage,
   type ToolInvocation,
-  // type ToolResultPart, // Not directly used in the transform, parts cover it
 } from 'ai';
-// Instead of importing 'openai' here and creating a new instance,
-// let's leverage your existing myProvider, assuming it's correctly configured.
-import { myProvider } from '@/lib/ai/providers'; // Ensure this provides the main OpenAI client
+import { openai } from '@ai-sdk/openai';
 import { auth, type UserType } from '@/app/(auth)/auth';
-// ... (other imports remain the same)
-import { systemPrompt, type RequestHints } from '@/lib/ai/prompts';
+import {
+  createStreamId,
+  deleteChatById,
+  getChatById,
+  getMessageCountByUserId,
+  getMessagesByChatId,
+  getStreamIdsByChatId,
+  saveChat,
+  saveMessages,
+} from '@/lib/db/queries';
+import { generateUUID, getTrailingMessageId } from '@/lib/utils';
+import { generateTitleFromUserMessage } from '../../actions';
+import { createDocument } from '@/lib/ai/tools/create-document';
+import { updateDocument } from '@/lib/ai/tools/update-document';
+import { requestSuggestions } from '@/lib/ai/tools/request-suggestions';
+import { getWeather } from '@/lib/ai/tools/get-weather';
+import { isProductionEnvironment } from '@/lib/constants';
+import { myProvider } from '@/lib/ai/providers';
+import { entitlementsByUserType } from '@/lib/ai/entitlements';
+import { postRequestBodySchema, type PostRequestBody } from './schema';
 import { geolocation, type Geo } from '@vercel/functions';
+import {
+  createResumableStreamContext,
+  type ResumableStreamContext,
+} from 'resumable-stream';
+import { after } from 'next/server';
+import type { Chat, DBMessage } from '@/lib/db/schema'; // Corrected import
+import { differenceInSeconds } from 'date-fns';
 import { ChatSDKError } from '@/lib/errors';
-// ... other imports
+import { systemPrompt, type RequestHints } from '@/lib/ai/prompts';
 
-// The transformDBMessagesToSDKMessages function from the previous response
-// might need adjustments based on the exact structure of SDKMessage
-// if toolInvocations and toolResults are handled differently by the assistant stream.
-// For now, let's assume it's mostly for content and role.
+export const maxDuration = 60;
+let globalStreamContext: ResumableStreamContext | null = null;
+
+function getStreamContext() {
+  if (!globalStreamContext) {
+    try {
+      globalStreamContext = createResumableStreamContext({ waitUntil: after });
+    } catch (error: any) {
+      if (error.message.includes('REDIS_URL')) {
+        console.log(' > Resumable streams are disabled due to missing REDIS_URL');
+      } else {
+        console.error(error);
+      }
+    }
+  }
+  return globalStreamContext;
+}
 
 function transformDBMessagesToSDKMessages(dbMessages: DBMessage[], incomingUserMessage: UIMessage): SDKMessage[] {
   const sdkMessages: SDKMessage[] = dbMessages.map(dbMsg => {
-    // Simplified transformation: focus on role and content.
-    // Tool calls and results are typically handled by the assistant run steps internally.
     let content = '';
+    const toolInvocations: ToolInvocation[] = [];
+
     if (Array.isArray(dbMsg.parts)) {
-      content = dbMsg.parts
-        .filter((part: any) => part.type === 'text')
-        .map((part: any) => part.text)
-        .join('\n');
+      dbMsg.parts.forEach((part: any) => {
+        if (part.type === 'text') {
+          content += part.text;
+        } else if (part.type === 'tool-invocation' && part.toolInvocation) {
+          toolInvocations.push(part.toolInvocation);
+        }
+      });
     } else if (typeof dbMsg.parts === 'string') {
       content = dbMsg.parts;
     }
 
-    return {
+    const sdkMessage: SDKMessage = {
       id: dbMsg.id,
       role: dbMsg.role as 'user' | 'assistant' | 'system' | 'tool',
       content: content,
       createdAt: dbMsg.createdAt,
-      // The experimental_streamAssistant expects a simpler Message structure for history
     };
+
+    if (toolInvocations.length > 0) {
+      sdkMessage.toolInvocations = toolInvocations;
+    }
+    // Handle toolResults similarly if they are part of your DBMessage.parts
+    // const toolResults: ToolResultPart[] = []; // Assuming ToolResultPart is imported
+    // if (Array.isArray(dbMsg.parts)) {
+    //   dbMsg.parts.forEach((part: any) => {
+    //     if (part.type === 'tool-result' && part.toolResult) {
+    //       toolResults.push(part.toolResult);
+    //     }
+    //   });
+    // }
+    // if (toolResults.length > 0) {
+    //   sdkMessage.toolResults = toolResults;
+    // }
+
+    return sdkMessage;
   });
 
-  // Add the current user message
   let currentUserMessageContent = '';
-    if (Array.isArray(incomingUserMessage.parts)) {
-        currentUserMessageContent = incomingUserMessage.parts
-            .filter(part => part.type === 'text')
-            .map(part => (part as { type: 'text'; text: string }).text)
-            .join('\n');
-    } else if (typeof incomingUserMessage.content === 'string') {
-        currentUserMessageContent = incomingUserMessage.content;
-    }
-
+  if (Array.isArray(incomingUserMessage.parts)) {
+      currentUserMessageContent = incomingUserMessage.parts
+          .filter(part => part.type === 'text')
+          .map(part => (part as { type: 'text'; text: string }).text)
+          .join('\n');
+  } else if (typeof incomingUserMessage.content === 'string') {
+      currentUserMessageContent = incomingUserMessage.content;
+  }
 
   sdkMessages.push({
     id: incomingUserMessage.id,
@@ -71,12 +123,9 @@ function transformDBMessagesToSDKMessages(dbMessages: DBMessage[], incomingUserM
   return sdkMessages;
 }
 
-
-// ... (rest of the imports and helper functions like getStreamContext)
-
 export async function POST(request: Request) {
-  // ... (request body parsing, auth, rate limiting, chat retrieval/creation as before)
   let requestBody: PostRequestBody;
+
   try {
     const json = await request.json();
     requestBody = postRequestBodySchema.parse(json);
@@ -136,18 +185,14 @@ export async function POST(request: Request) {
   await createStreamId({ streamId, chatId: id });
 
   const requestHints = geolocation(request) as RequestHints;
+  const openAIClient = myProvider.languageModel(selectedChatModel);
 
   const stream = createDataStream({
      execute: async (dataStream) => {
-      // Use the specific OpenAI client from your provider for experimental_streamAssistant
-      // myProvider.assistantModel() returns the Assistant instance, not the main OpenAI client.
-      // myProvider.languageModel() returns a LanguageModel, which is the OpenAI client.
-      const openAIClient = myProvider.languageModel(selectedChatModel); // This should give the OpenAI client
-
       const result = openAIClient.experimental_streamAssistant({
         assistantId: process.env.OPENAI_ASSISTANT_ID!,
         system: systemPrompt({ selectedChatModel, requestHints }),
-        messages: messagesForSDK, // Ensure this matches the expected Message[] structure
+        messages: messagesForSDK,
         maxSteps: 5,
         experimental_activeTools:
           selectedChatModel === 'chat-model-reasoning'
@@ -209,7 +254,6 @@ export async function POST(request: Request) {
   return new Response(stream);
 }
 
-// GET and DELETE handlers (assuming they are correct from previous versions)
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const chatId = searchParams.get('chatId');
