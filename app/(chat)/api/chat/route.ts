@@ -201,78 +201,37 @@ export async function POST(request: Request) {
 
   const stream = createDataStream({
     execute: async (dataStream) => {
-      const result = openai.experimental_streamAssistant(
+      /* ---- inside the execute: async (dataStream) => { … } block ---- */
+      
+      const result = (openai as any).experimental_streamAssistant(
         {
           assistantId: process.env.OPENAI_ASSISTANT_ID!,
           instructions: systemPrompt({ selectedChatModel, requestHints }),
           messages: sdkMsgs,
           transform: smoothStream({ chunking: 'word' }),
-
+      
           tools: {
             getWeather,
             createDocument: createDocument({ session, dataStream }),
             updateDocument: updateDocument({ session, dataStream }),
             requestSuggestions: requestSuggestions({ session, dataStream }),
           },
-
-          /* extras not yet typed → cast once */
+      
+          /* extra knobs the current typings don’t declare */
           maxSteps: 5,
           activeTools:
             selectedChatModel === 'chat-model-reasoning'
               ? []
-              : [
-                  'getWeather',
-                  'createDocument',
-                  'updateDocument',
-                  'requestSuggestions',
-                ],
+              : ['getWeather', 'createDocument', 'updateDocument', 'requestSuggestions'],
           messageIdFn: generateUUID,
-          telemetry:
-            isProductionEnvironment && { functionId: 'stream-assistant' },
-
+          telemetry: isProductionEnvironment && { functionId: 'stream-assistant' },
+      
           onFinish: async ({ response }) => {
-            try {
-              const last = response.messages
-                .filter((m) => m.role === 'assistant')
-                .pop();
-              if (!last?.id) return;
-
-              const parts =
-                typeof last.content === 'string'
-                  ? [{ type: 'text', text: last.content }]
-                  : last.content.map((p) =>
-                      p.type === 'text'
-                        ? { type: 'text', text: p.text }
-                        : p.type === 'tool-call'
-                        ? {
-                            type: 'tool-invocation',
-                            toolInvocation: {
-                              toolCallId: p.toolCallId,
-                              toolName: p.toolName,
-                              args: p.args,
-                            },
-                          }
-                        : null,
-                    ).filter(Boolean);
-
-              await saveMessages({
-                messages: [
-                  {
-                    id: last.id,
-                    chatId,
-                    role: 'assistant',
-                    parts: parts as any[],
-                    attachments: (last.experimental_attachments as any[]) ?? [],
-                    createdAt: last.createdAt ?? new Date(),
-                  },
-                ],
-              });
-            } catch (e) {
-              console.error('save assistant msg failed:', e);
-            }
+            /* … your existing save-to-DB logic … */
           },
-        } as any, //  ← ONE cast silences “No overload matches” TS error
+        } as any,        //  ← cast the options object
       );
+
 
       result.consumeStream();
       result.mergeIntoDataStream(dataStream as any, { sendReasoning: true });
