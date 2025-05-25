@@ -106,7 +106,7 @@ function toSDKMessages(
         msgs.push({
           ...base,
           role: 'assistant',
-          content: [Archived tool interaction]\n${text},
+          content: `Archived tool interaction\n${text}`,
         });
         break;
       default:
