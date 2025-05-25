@@ -230,7 +230,7 @@ const result = await (openai as any).experimental.streamAssistant({
       : ['getWeather', 'createDocument', 'updateDocument', 'requestSuggestions'],
   messageIdFn: generateUUID,
   telemetry: isProductionEnvironment && { functionId: 'stream-assistant' },
-  onFinish: async ({ response }) => {
+  onFinish: async ({ response }: { response: any }) => {
     // DB save logic
   },
 });
