@@ -237,10 +237,7 @@ export async function POST(request: Request) {
       result.mergeIntoDataStream(dataStream as any, { sendReasoning: true });
     },
     onError: (e) =>
-      new ChatSDKError(
-        'bad_request:stream',
-        e instanceof Error ? e.message : 'unknown',
-      ).toResponse(),
+      `stream failed: ${e instanceof Error ? e.message : 'unknown'}`,
   });
 
   /* 5 ▸ resumable handling ---------------------------------------- */
