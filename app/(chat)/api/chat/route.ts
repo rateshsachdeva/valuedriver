@@ -21,7 +21,7 @@ import {
   saveMessages,
 } from '@/lib/db/queries';
 import { generateUUID } from '@/lib/utils';
-
+import { streamAssistant } from 'ai';
 
 import { createDocument } from '@/lib/ai/tools/create-document';
 import { updateDocument } from '@/lib/ai/tools/update-document';
@@ -211,19 +211,17 @@ await saveChat({
     execute: async (dataStream) => {
       /* ---- inside the execute: async (dataStream) => { … } block ---- */
       
-const result = await openai.experimental.streamAssistant({
+const result = await streamAssistant({
   assistantId: process.env.OPENAI_ASSISTANT_ID!,
   instructions: systemPrompt({ selectedChatModel, requestHints }),
   messages: sdkMsgs,
   transform: smoothStream({ chunking: 'word' }),
-
   tools: {
     getWeather,
     createDocument: createDocument({ session, dataStream }),
     updateDocument: updateDocument({ session, dataStream }),
     requestSuggestions: requestSuggestions({ session, dataStream }),
   },
-
   maxSteps: 5,
   activeTools:
     selectedChatModel === 'chat-model-reasoning'
@@ -231,11 +229,11 @@ const result = await openai.experimental.streamAssistant({
       : ['getWeather', 'createDocument', 'updateDocument', 'requestSuggestions'],
   messageIdFn: generateUUID,
   telemetry: isProductionEnvironment && { functionId: 'stream-assistant' },
-
-  onFinish: async ({ response }: { response: any }) => {
-    // You can insert your DB-saving logic here
+  onFinish: async ({ response }) => {
+    // optional save-to-DB logic
   },
 });
+
 
 
 
