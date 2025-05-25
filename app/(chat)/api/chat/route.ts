@@ -3,7 +3,10 @@ import {
   smoothStream,
   type UIMessage,
   type Message as SDKMessage,
-  // We will construct message objects that strictly have role and string content for history
+  // Specific part types might not be directly used in messagesForSDK if content is always string
+  // type ToolInvocation as SDKToolInvocation, // If needed for constructing string content
+  // type ToolCallPart as SDKToolCallPart,    // If needed for constructing string content
+  // type TextPart as SDKTextPart,           // If needed for constructing string content
 } from 'ai';
 import { openai } from '@ai-sdk/openai';
 import { auth, type UserType } from '@/app/(auth)/auth';
@@ -56,6 +59,11 @@ function getStreamContext() {
   return globalStreamContext;
 }
 
+// Based on Vercel build error history, the SDKMessage type for experimental_streamAssistant
+// appears to expect roles: 'user' | 'data' | 'system' | 'assistant'.
+// And, most importantly, 'content' must be a string for all these roles in the history.
+type ExpectedSDKMessageRole = 'user' | 'data' | 'system' | 'assistant';
+
 function transformDBMessagesToSDKMessages(dbMessages: DBMessage[], incomingUserMessage: UIMessage): SDKMessage[] {
   const sdkMessages: SDKMessage[] = [];
 
@@ -63,7 +71,8 @@ function transformDBMessagesToSDKMessages(dbMessages: DBMessage[], incomingUserM
     const currentDbRole = dbMsg.role as string;
     let concatenatedTextContent = '';
 
-    // Consolidate all parts into a single string for the 'content' field.
+    // Consolidate all parts into a single string for the 'content' field for ALL roles.
+    // This is to satisfy the strict 'content: string' requirement indicated by build errors.
     if (Array.isArray(dbMsg.parts)) {
       dbMsg.parts.forEach((part: any) => {
         if (part.type === 'text' && typeof part.text === 'string') {
@@ -84,40 +93,58 @@ function transformDBMessagesToSDKMessages(dbMessages: DBMessage[], incomingUserM
     const baseSdkMessageProps = {
       id: dbMsg.id,
       createdAt: dbMsg.createdAt,
-      // experimental_attachments are not standard on SDKMessage for history, omitting for simplicity
+      // experimental_attachments are not a standard part of historical SDKMessage for assistant calls
+      // Omitting here to simplify and strictly adhere to core Message properties.
+      // experimental_attachments: (dbMsg.attachments as any[]) ?? undefined,
     };
 
-    // Strict adherence to roles that accept simple string content for history
-    if (currentDbRole === 'user' || currentDbRole === 'assistant' || currentDbRole === 'system') {
+    // Ensure the role is one of the expected types and content is ALWAYS string
+    if (['user', 'system', 'assistant'].includes(currentDbRole)) {
       sdkMessages.push({
         ...baseSdkMessageProps,
-        role: currentDbRole as 'user' | 'assistant' | 'system',
+        role: currentDbRole as 'user' | 'system' | 'assistant',
         content: concatenatedTextContent, // Content is ALWAYS a string
       });
+    } else if (currentDbRole === 'data') {
+        const contentForDataRole = typeof dbMsg.parts === 'string'
+            ? dbMsg.parts
+            : JSON.stringify(dbMsg.parts); // Stringify if not already string
+        sdkMessages.push({
+            ...baseSdkMessageProps,
+            role: 'data',
+            content: contentForDataRole, // Content is ALWAYS a string
+        });
+    } else if (currentDbRole === 'tool') {
+      // 'tool' role was previously identified as problematic for the ExpectedSDKMessageRole union.
+      // Stringify its content and map to a role that accepts string content if necessary, or filter.
+      console.warn(`Transforming DB message with role 'tool' (ID: ${dbMsg.id}) to an 'assistant' message with stringified content for SDK history.`);
+      sdkMessages.push({
+        ...baseSdkMessageProps,
+        role: 'assistant', // Remapping 'tool' to 'assistant' as a workaround
+        content: `[Archived Tool Interaction: ${concatenatedTextContent}]`, // Content is string
+      });
     } else {
-      // Filter out other roles like 'data' or 'tool' if they are causing issues
-      // or if their string representation isn't meaningful for assistant history.
-      console.warn(`Skipping DB message with role '${currentDbRole}' (ID: ${dbMsg.id}) for SDK history due to strict type requirements.`);
+      console.warn(`Unknown or unhandled role '${currentDbRole}' from DB message (ID: ${dbMsg.id}). Skipping.`);
     }
   });
 
   // Add the current incoming user message
   let currentUserMessageContent = '';
-  if (Array.isArray(incomingMessage.parts)) {
-      currentUserMessageContent = incomingMessage.parts
+  if (Array.isArray(incomingUserMessage.parts)) {
+      currentUserMessageContent = incomingUserMessage.parts
           .filter(part => part.type === 'text')
           .map(part => (part as { type: 'text'; text: string }).text)
           .join('\n');
-  } else if (typeof incomingMessage.content === 'string') {
-      currentUserMessageContent = incomingMessage.content;
+  } else if (typeof incomingUserMessage.content === 'string') {
+      currentUserMessageContent = incomingUserMessage.content;
   }
 
   sdkMessages.push({
-    id: incomingMessage.id,
+    id: incomingUserMessage.id,
     role: 'user',
     content: currentUserMessageContent, // Content is string
-    createdAt: new Date(incomingMessage.createdAt),
-    experimental_attachments: incomingMessage.experimental_attachments // This is for the UI message, SDK might not use it for history
+    createdAt: new Date(incomingUserMessage.createdAt),
+    experimental_attachments: incomingUserMessage.experimental_attachments // This is for the UI/current message
   });
 
   return sdkMessages;
@@ -190,7 +217,7 @@ export async function POST(request: Request) {
 
   const stream = createDataStream({
      execute: async (dataStream) => {
-      const result = openAIClient.experimental_streamAssistant({ // This is where error occurred (approx line 146)
+      const result = openAIClient.experimental_streamAssistant({ // This is line 146 (approx)
         assistantId: process.env.OPENAI_ASSISTANT_ID!,
         system: systemPrompt({ selectedChatModel, requestHints }),
         messages: messagesForSDK,
@@ -226,7 +253,7 @@ export async function POST(request: Request) {
                             }};
                         }
                         console.warn("Unhandled SDK part type in onFinish for DB save:", part.type);
-                        return null;
+                        return null; // Or handle as an unknown part if your DB schema supports it
                     }).filter(p => p !== null) as any[];
                  }
 
@@ -273,7 +300,7 @@ export async function POST(request: Request) {
   return new Response(stream);
 }
 
-// GET and DELETE handlers
+// GET and DELETE handlers (no changes from previous version)
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const chatId = searchParams.get('chatId');
