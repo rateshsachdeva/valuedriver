@@ -226,7 +226,7 @@ export async function POST(request: Request) {
           messageIdFn: generateUUID,
           telemetry: isProductionEnvironment && { functionId: 'stream-assistant' },
       
-          onFinish: async ({ response }) => {
+          onFinish: async ({ response }: { response: any }) => {
             /* … your existing save-to-DB logic … */
           },
         } as any,        //  ← cast the options object
