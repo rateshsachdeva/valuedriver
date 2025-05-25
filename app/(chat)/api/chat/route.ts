@@ -82,9 +82,9 @@ function toSDKMessages(
             p.type === 'text'
               ? p.text
               : p.type === 'tool-invocation'
-              ? [Tool call: ${p.toolInvocation.toolName}]
+              ? `Tool call: ${p.toolInvocation.toolName}`
               : p.type === 'tool-result'
-              ? [Tool result: ${p.toolResult.toolName}]
+              ? `Tool result: ${p.toolResult.toolName}`
               : '',
           )
           .filter(Boolean)
