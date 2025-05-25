@@ -212,7 +212,7 @@ await saveChat({
     execute: async (dataStream) => {
       /* ---- inside the execute: async (dataStream) => { … } block ---- */
       
-const result = await (openai as any).experimental.streamAssistant({
+const result = await streamAssistant({
   assistantId: process.env.OPENAI_ASSISTANT_ID!,
   instructions: systemPrompt({ selectedChatModel, requestHints }),
   messages: sdkMsgs,
@@ -231,9 +231,10 @@ const result = await (openai as any).experimental.streamAssistant({
   messageIdFn: generateUUID,
   telemetry: isProductionEnvironment && { functionId: 'stream-assistant' },
   onFinish: async ({ response }: { response: any }) => {
-    // DB save logic
+    // Optional: handle saving result to DB
   },
 });
+
 
 
 
