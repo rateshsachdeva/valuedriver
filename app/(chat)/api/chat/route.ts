@@ -5,7 +5,6 @@
 import {
   createDataStream,
   smoothStream,
-  experimental_streamAssistant,
   type UIMessage,
   type Message as SDKMessage,
 } from 'ai';
@@ -22,6 +21,7 @@ import {
   saveMessages,
 } from '@/lib/db/queries';
 import { generateUUID } from '@/lib/utils';
+import { experimental_streamAssistant } from 'ai';
 
 import { createDocument } from '@/lib/ai/tools/create-document';
 import { updateDocument } from '@/lib/ai/tools/update-document';
@@ -67,20 +67,28 @@ function streamCtx() {
   return globalStreamCtx;
 }
 
-function toSDKMessages(dbMsgs: DBMessage[], incoming: UIMessage): SDKMessage[] {
+/* ---------- DB → SDK message transform --------------------------- */
+
+function toSDKMessages(
+  dbMsgs: DBMessage[],
+  incoming: UIMessage,
+): SDKMessage[] {
   const msgs: SDKMessage[] = [];
 
   dbMsgs.forEach((db) => {
     const text = Array.isArray(db.parts)
-      ? db.parts.map((p: any) =>
-          p.type === 'text'
-            ? p.text
-            : p.type === 'tool-invocation'
-            ? `[Tool call: ${p.toolInvocation.toolName}]`
-            : p.type === 'tool-result'
-            ? `[Tool result: ${p.toolResult.toolName}]`
-            : ''
-        ).filter(Boolean).join('\n')
+      ? db.parts
+          .map((p: any) =>
+            p.type === 'text'
+              ? p.text
+              : p.type === 'tool-invocation'
+              ? [Tool call: ${p.toolInvocation.toolName}]
+              : p.type === 'tool-result'
+              ? [Tool result: ${p.toolResult.toolName}]
+              : '',
+          )
+          .filter(Boolean)
+          .join('\n')
       : String(db.parts);
 
     const base = { id: db.id, createdAt: db.createdAt };
@@ -98,16 +106,20 @@ function toSDKMessages(dbMsgs: DBMessage[], incoming: UIMessage): SDKMessage[] {
         msgs.push({
           ...base,
           role: 'assistant',
-          content: `[Archived tool interaction]\n${text}`,
+          content: [Archived tool interaction]\n${text},
         });
         break;
       default:
-        console.warn(`Skipping unknown role “${db.role}” (id ${db.id})`);
+        console.warn(Skipping unknown role “${db.role}” (id ${db.id}));
     }
   });
 
+  // add current user message
   const uText = Array.isArray(incoming.parts)
-    ? incoming.parts.filter((p) => p.type === 'text').map((p) => (p as any).text).join('\n')
+    ? incoming.parts
+        .filter((p) => p.type === 'text')
+        .map((p) => (p as any).text)
+        .join('\n')
     : (incoming.content as string);
 
   msgs.push({
@@ -125,6 +137,7 @@ function toSDKMessages(dbMsgs: DBMessage[], incoming: UIMessage): SDKMessage[] {
    POST  /api/chat
    ================================================================== */
 export async function POST(request: Request) {
+  /* 1 ▸ body & auth ------------------------------------------------ */
   let body: PostRequestBody;
   try {
     body = postRequestBodySchema.parse(await request.json());
@@ -150,22 +163,28 @@ export async function POST(request: Request) {
     return new ChatSDKError('rate_limit:chat').toResponse();
   }
 
+  /* 2 ▸ chat row --------------------------------------------------- */
   const chat = await getChatById({ id: chatId });
   if (!chat) {
-    const firstUserText = Array.isArray(incoming.parts)
-      ? incoming.parts.filter(p => p.type === 'text').map(p => (p as any).text).join(' ')
-      : (incoming.content as string);
+// Title = first 80-char slice of the user’s opening message
+const firstUserText = Array.isArray(incoming.parts)
+  ? incoming.parts
+      .filter(p => p.type === 'text')
+      .map(p => (p as any).text)
+      .join(' ')
+  : (incoming.content as string);
 
-    await saveChat({
-      id: chatId,
-      userId: session.user.id,
-      title: firstUserText.slice(0, 80) || 'Untitled chat',
-      visibility: selectedVisibilityType,
-    });
+await saveChat({
+  id: chatId,
+  userId: session.user.id,
+  title: firstUserText.slice(0, 80) || 'Untitled chat',
+  visibility: selectedVisibilityType,
+});
   } else if (chat.userId !== session.user.id) {
     return new ChatSDKError('forbidden:chat').toResponse();
   }
 
+  /* 3 ▸ previous msgs + save current ------------------------------ */
   const prev = await getMessagesByChatId({ id: chatId });
   const sdkMsgs = toSDKMessages(prev, incoming);
 
@@ -182,6 +201,7 @@ export async function POST(request: Request) {
     ],
   });
 
+  /* 4 ▸ assistant stream ------------------------------------------ */
   const streamId = generateUUID();
   await createStreamId({ streamId, chatId });
 
@@ -189,36 +209,46 @@ export async function POST(request: Request) {
 
   const stream = createDataStream({
     execute: async (dataStream) => {
+      /* ---- inside the execute: async (dataStream) => { … } block ---- */
+      
       const result = await experimental_streamAssistant({
-        assistantId: process.env.OPENAI_ASSISTANT_ID!,
-        instructions: systemPrompt({ selectedChatModel, requestHints }),
-        messages: sdkMsgs,
-        transform: smoothStream({ chunking: 'word' }),
-        tools: {
-          getWeather,
-          createDocument: createDocument({ session, dataStream }),
-          updateDocument: updateDocument({ session, dataStream }),
-          requestSuggestions: requestSuggestions({ session, dataStream }),
-        },
-        maxSteps: 5,
-        activeTools:
-          selectedChatModel === 'chat-model-reasoning'
-            ? []
-            : ['getWeather', 'createDocument', 'updateDocument', 'requestSuggestions'],
-        messageIdFn: generateUUID,
-        telemetry: isProductionEnvironment && { functionId: 'stream-assistant' },
-        onFinish: async ({ response }: { response: any }) => {
-          // Optional: save assistant response to DB
-        },
-      });
+        {
+          assistantId: process.env.OPENAI_ASSISTANT_ID!,
+          instructions: systemPrompt({ selectedChatModel, requestHints }),
+          messages: sdkMsgs,
+          transform: smoothStream({ chunking: 'word' }),
+      
+          tools: {
+            getWeather,
+            createDocument: createDocument({ session, dataStream }),
+            updateDocument: updateDocument({ session, dataStream }),
+            requestSuggestions: requestSuggestions({ session, dataStream }),
+          },
+      
+          /* extra knobs the current typings don’t declare */
+          maxSteps: 5,
+          activeTools:
+            selectedChatModel === 'chat-model-reasoning'
+              ? []
+              : ['getWeather', 'createDocument', 'updateDocument', 'requestSuggestions'],
+          messageIdFn: generateUUID,
+          telemetry: isProductionEnvironment && { functionId: 'stream-assistant' },
+      
+          onFinish: async ({ response }: { response: any }) => {
+            /* … your existing save-to-DB logic … */
+          },
+        } as any,        //  ← cast the options object
+      );
+
 
       result.consumeStream();
       result.mergeIntoDataStream(dataStream as any, { sendReasoning: true });
     },
     onError: (e) =>
-      `stream failed: ${e instanceof Error ? e.message : 'unknown'}`,
+      stream failed: ${e instanceof Error ? e.message : 'unknown'},
   });
 
+  /* 5 ▸ resumable handling ---------------------------------------- */
   const ctx = streamCtx();
   if (ctx) {
     return new Response(await ctx.resumableStream(streamId, () => stream));
@@ -226,4 +256,69 @@ export async function POST(request: Request) {
   return new Response(stream);
 }
 
-/* GET and DELETE endpoints remain unchanged */
+/* ==================================================================
+   GET /api/chat           – unchanged
+   DELETE /api/chat        – unchanged
+   ================================================================== */
+
+export async function GET(request: Request) {
+  const { searchParams } = new URL(request.url);
+  const chatId = searchParams.get('chatId');
+  if (!chatId)
+    return new ChatSDKError('bad_request:api', '"chatId" required').toResponse();
+
+  const ctx = streamCtx();
+  if (!ctx) return new Response(null, { status: 404 });
+
+  const ids = await getStreamIdsByChatId({ chatId });
+  const active = ids.at(-1);
+  if (!active) return new Response(null, { status: 404 });
+
+  const session = await auth();
+  if (!session?.user)
+    return new ChatSDKError('unauthorized:stream').toResponse();
+
+  const chat = (await getChatById({ id: chatId })) as Chat;
+  if (!chat)
+    return new ChatSDKError('not_found:chat').toResponse();
+
+  if (chat.visibility === 'private' && chat.userId !== session.user.id)
+    return new ChatSDKError('forbidden:stream').toResponse();
+
+  const resumable = await (ctx as any).getResumableStream(active);
+  if (!resumable || resumable.status !== 'found') return new Response(null, { status: 404 });
+
+  if (
+    differenceInSeconds(new Date(), new Date(resumable.lastUpdatedAt)) > 60
+  ) {
+    await (ctx as any).deleteResumableStream(active);
+    return new Response(null, { status: 200 });
+  }
+  return new Response(resumable.data);
+}
+
+export async function DELETE(request: Request) {
+  const { searchParams } = new URL(request.url);
+  const id = searchParams.get('id');
+  if (!id)
+    return new ChatSDKError('bad_request:api', '"id" required').toResponse();
+
+  const session = await auth();
+  if (!session?.user)
+    return new ChatSDKError('unauthorized:chat').toResponse();
+
+  const chat = await getChatById({ id });
+  if (!chat) return new ChatSDKError('not_found:chat').toResponse();
+  if (chat.userId !== session.user.id)
+    return new ChatSDKError('forbidden:chat').toResponse();
+
+  const deleted = await deleteChatById({ id });
+
+  const ctx = streamCtx();
+  if (ctx) {
+    const ids = await getStreamIdsByChatId({ chatId: id });
+    for (const sid of ids) await (ctx as any).deleteResumableStream(sid);
+  }
+
+  return Response.json(deleted, { status: 200 });
+}
