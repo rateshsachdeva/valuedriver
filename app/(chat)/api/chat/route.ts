@@ -1,12 +1,12 @@
 import {
-  appendClientMessage,
-  // appendResponseMessages, // Not directly used for SDK message construction
   createDataStream,
   smoothStream,
   type UIMessage,
-  type Message as SDKMessage, // This is the type we need to align with
-  type ToolInvocation,
-  // type ToolResultPart, // If needed for constructing tool messages
+  type Message as SDKMessage,
+  type ToolInvocation as SDKToolInvocation,
+  type ToolCallPart as SDKToolCallPart,
+  type TextPart as SDKTextPart,
+  type AssistantMessage, // Specific type for assistant messages
 } from 'ai';
 import { openai } from '@ai-sdk/openai';
 import { auth, type UserType } from '@/app/(auth)/auth';
@@ -49,66 +49,79 @@ function getStreamContext() {
     try {
       globalStreamContext = createResumableStreamContext({ waitUntil: after });
     } catch (error: any) {
-      // ... (error handling)
+      if (error.message.includes('REDIS_URL')) {
+        console.log(' > Resumable streams are disabled due to missing REDIS_URL');
+      } else {
+        console.error(error);
+      }
     }
   }
   return globalStreamContext;
 }
 
-// Define the role type expected by the SDK based on the error message
 type ExpectedSDKMessageRole = 'user' | 'data' | 'system' | 'assistant';
 
 function transformDBMessagesToSDKMessages(dbMessages: DBMessage[], incomingUserMessage: UIMessage): SDKMessage[] {
   const sdkMessages: SDKMessage[] = [];
 
   dbMessages.forEach(dbMsg => {
-    let content = '';
-    const toolInvocations: ToolInvocation[] = []; // For assistant messages with tool calls
+    const currentRole = dbMsg.role as string;
+    let contentForSDK: string | Array<SDKTextPart | SDKToolCallPart> = '';
+    const textPartsAggregated: string[] = [];
+    const toolCallParts: SDKToolCallPart[] = [];
 
     if (Array.isArray(dbMsg.parts)) {
       dbMsg.parts.forEach((part: any) => {
-        if (part.type === 'text') {
-          content += part.text;
-        } else if (dbMsg.role === 'assistant' && part.type === 'tool-invocation' && part.toolInvocation) {
-          // Assuming tool invocations are only on assistant messages
-          toolInvocations.push(part.toolInvocation);
+        if (part.type === 'text' && typeof part.text === 'string') {
+          textPartsAggregated.push(part.text);
+        } else if (currentRole === 'assistant' && part.type === 'tool-invocation' && part.toolInvocation) {
+          toolCallParts.push({
+            type: 'tool-call', // This type property is crucial for ToolCallPart
+            toolCallId: part.toolInvocation.toolCallId || generateUUID(),
+            toolName: part.toolInvocation.toolName,
+            args: part.toolInvocation.args,
+          });
         }
-        // How to handle dbMsg.role === 'tool' if SDKMessage doesn't allow it?
-        // If role 'tool' must be mapped to 'data' or represented differently:
-        // else if (dbMsg.role === 'tool' && part.type === 'tool-result' && part.toolResult) {
-        //   // This is tricky. 'data' role often expects specific structure.
-        //   // For now, we are filtering out 'tool' roles if they are not directly supported by SDKMessage
-        // }
+        // Note: dbMsg.role === 'tool' (tool results) are handled below by filtering
       });
-    } else if (typeof dbMsg.parts === 'string') {
-      content = dbMsg.parts;
+    } else if (typeof dbMsg.parts === 'string') { // Legacy or simple text
+      textPartsAggregated.push(dbMsg.parts);
     }
 
-    // Adapt role based on the error message.
-    // If dbMsg.role can be 'tool', this cast will be problematic if ExpectedSDKMessageRole does not include 'tool'.
-    // The error "Type '"user" | "system" | "assistant" | "tool"' is not assignable to type '"user" | "data" | "system" | "assistant"'."
-    // implies the target `SDKMessage.role` is `ExpectedSDKMessageRole`.
-    // So, we must ensure `dbMsg.role` fits into `ExpectedSDKMessageRole`.
-    const currentRole = dbMsg.role as string;
-    if (['user', 'data', 'system', 'assistant'].includes(currentRole)) {
-      const sdkMessage: SDKMessage = {
+    if (['user', 'system', 'data'].includes(currentRole)) {
+      contentForSDK = textPartsAggregated.join('\n');
+      sdkMessages.push({
         id: dbMsg.id,
         role: currentRole as ExpectedSDKMessageRole,
-        content: content,
+        content: contentForSDK,
         createdAt: dbMsg.createdAt,
-      };
-      if (currentRole === 'assistant' && toolInvocations.length > 0) {
-        sdkMessage.toolInvocations = toolInvocations;
+      });
+    } else if (currentRole === 'assistant') {
+      if (toolCallParts.length > 0) {
+        const assistantContent: Array<SDKTextPart | SDKToolCallPart> = [];
+        const aggregatedText = textPartsAggregated.join('\n').trim();
+        if (aggregatedText) {
+          assistantContent.push({ type: 'text', text: aggregatedText });
+        }
+        assistantContent.push(...toolCallParts);
+        contentForSDK = assistantContent;
+      } else {
+        contentForSDK = textPartsAggregated.join('\n');
       }
-      sdkMessages.push(sdkMessage);
+      sdkMessages.push({
+        id: dbMsg.id,
+        role: 'assistant', // Explicitly 'assistant'
+        content: contentForSDK,
+        createdAt: dbMsg.createdAt,
+      } as AssistantMessage); // Cast to AssistantMessage if content is array of parts
     } else if (currentRole === 'tool') {
-      // If the SDKMessage type *truly* doesn't support 'tool' (as per the error),
-      // you must decide how to handle these messages.
-      // Option 1: Filter them out (might lose context for the AI).
-      // Option 2: Try to represent them as 'data' if appropriate (structure matters).
-      // Option 3: Stringify tool results and append to a previous assistant or subsequent user message (complex).
-      // For now, let's log a warning and skip, to satisfy the type checker based on the error.
-      console.warn(`Skipping message with unmappable role 'tool': ${dbMsg.id}`);
+      // Based on the error "Type '...' is not assignable to type '... | "data" | ...'",
+      // 'tool' is not an expected role for the `messages` array in experimental_streamAssistant.
+      // Tool results are typically sent back to the assistant run via a separate mechanism
+      // or handled by the SDK when it reports tool calls that need execution.
+      // For message history, we might have to omit these or transform them differently if critical.
+      // For now, filtering them out to match the expected type signature.
+      console.warn(`Filtering out DB message with role 'tool': ${dbMsg.id} as it's not directly supported in SDKMessage history for this call.`);
     }
   });
 
@@ -125,7 +138,7 @@ function transformDBMessagesToSDKMessages(dbMessages: DBMessage[], incomingUserM
   sdkMessages.push({
     id: incomingUserMessage.id,
     role: 'user',
-    content: currentUserMessageContent, // Ensure this is a string
+    content: currentUserMessageContent,
     createdAt: new Date(incomingUserMessage.createdAt),
     experimental_attachments: incomingUserMessage.experimental_attachments
   });
@@ -176,7 +189,6 @@ export async function POST(request: Request) {
   }
 
   const previousDBMessages = await getMessagesByChatId({ id });
-  // The messagesForSDK should be an array of SDKMessage
   const messagesForSDK: SDKMessage[] = transformDBMessagesToSDKMessages(previousDBMessages, incomingMessage as UIMessage);
 
 
@@ -197,14 +209,14 @@ export async function POST(request: Request) {
   await createStreamId({ streamId, chatId: id });
 
   const requestHints = geolocation(request) as RequestHints;
-  const openAIClient = myProvider.languageModel(selectedChatModel);
+  const openAIClient = myProvider.languageModel(selectedChatModel); // This should be your OpenAI client from @ai-sdk/openai
 
   const stream = createDataStream({
      execute: async (dataStream) => {
-      const result = openAIClient.experimental_streamAssistant({
+      const result = openAIClient.experimental_streamAssistant({ // This is line 129
         assistantId: process.env.OPENAI_ASSISTANT_ID!,
         system: systemPrompt({ selectedChatModel, requestHints }),
-        messages: messagesForSDK, // This now uses the transformed messages
+        messages: messagesForSDK,
         maxSteps: 5,
         experimental_activeTools:
           selectedChatModel === 'chat-model-reasoning'
@@ -266,7 +278,7 @@ export async function POST(request: Request) {
   return new Response(stream);
 }
 
-// GET and DELETE handlers remain the same
+// GET and DELETE handlers
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const chatId = searchParams.get('chatId');
