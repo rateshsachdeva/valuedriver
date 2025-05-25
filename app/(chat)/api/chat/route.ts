@@ -8,7 +8,7 @@ import {
   type UIMessage,
   type Message as SDKMessage,
 } from 'ai';
-import { openai } from '@ai-sdk/openai';
+import { streamAssistant } from 'ai';
 import { auth, type UserType } from '@/app/(auth)/auth';
 import {
   createStreamId,
@@ -212,9 +212,10 @@ await saveChat({
     execute: async (dataStream) => {
       /* ---- inside the execute: async (dataStream) => { … } block ---- */
       
-const result = await (openai as any).experimental.streamAssistant({
+const result = await streamAssistant({
+  provider: openai,
   assistantId: process.env.OPENAI_ASSISTANT_ID!,
-  instructions: systemPrompt({ selectedChatModel, requestHints }),
+  instructions: 'Your prompt',
   messages: sdkMsgs,
   transform: smoothStream({ chunking: 'word' }),
   tools: {
@@ -224,14 +225,11 @@ const result = await (openai as any).experimental.streamAssistant({
     requestSuggestions: requestSuggestions({ session, dataStream }),
   },
   maxSteps: 5,
-  activeTools:
-    selectedChatModel === 'chat-model-reasoning'
-      ? []
-      : ['getWeather', 'createDocument', 'updateDocument', 'requestSuggestions'],
+  activeTools: ['getWeather', 'createDocument', 'updateDocument', 'requestSuggestions'],
   messageIdFn: generateUUID,
   telemetry: isProductionEnvironment && { functionId: 'stream-assistant' },
-  onFinish: async ({ response }: { response: any }) => {
-    // Optional: handle saving result to DB
+  onFinish: async ({ response }) => {
+    console.log('✅ Response from Assistant:', response);
   },
 });
 
