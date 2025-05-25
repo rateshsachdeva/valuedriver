@@ -4,6 +4,7 @@ import {
   createDataStream,
   smoothStream,
   streamText,
+  experimental_streamAssistant,
 } from 'ai';
 import { auth, type UserType } from '@/app/(auth)/auth';
 import {
@@ -27,7 +28,8 @@ import { myProvider } from '@/lib/ai/providers';
 import { entitlementsByUserType } from '@/lib/ai/entitlements';
 import { postRequestBodySchema, type PostRequestBody } from './schema';
 import { geolocation } from '@vercel/functions';
-import { streamAssistant } from 'ai';
+
+
 import {
   createResumableStreamContext,
   type ResumableStreamContext,
@@ -132,7 +134,7 @@ export async function POST(request: Request) {
 
   const stream = createDataStream({
      execute: async (dataStream) => {
-      const result = streamAssistant({
+      const result = experimental_streamAssistant({
         model: myProvider.assistantModel(),
         system: systemPrompt({ selectedChatModel, requestHints }),
         messages,
