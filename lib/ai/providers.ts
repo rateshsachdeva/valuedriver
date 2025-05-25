@@ -11,7 +11,8 @@ export const myProvider = {
       throw new Error('Missing OPENAI_ASSISTANT_ID in environment variables.');
     }
 
-    return openai.assistant(assistantId);
+    // helper kept for runtime compat; cast to suppress missing type
+    return (openai as any).assistant(assistantId);
   },
 
   /**
