@@ -6,7 +6,7 @@ import {
   type ToolInvocation as SDKToolInvocation,
   type ToolCallPart as SDKToolCallPart,
   type TextPart as SDKTextPart,
-  type AssistantMessage, // Specific type for assistant messages
+  type AssistantMessage, // Keep this for clarity if needed but avoid casting to it when pushing to SDKMessage[]
 } from 'ai';
 import { openai } from '@ai-sdk/openai';
 import { auth, type UserType } from '@/app/(auth)/auth';
@@ -76,52 +76,51 @@ function transformDBMessagesToSDKMessages(dbMessages: DBMessage[], incomingUserM
           textPartsAggregated.push(part.text);
         } else if (currentRole === 'assistant' && part.type === 'tool-invocation' && part.toolInvocation) {
           toolCallParts.push({
-            type: 'tool-call', // This type property is crucial for ToolCallPart
+            type: 'tool-call',
             toolCallId: part.toolInvocation.toolCallId || generateUUID(),
             toolName: part.toolInvocation.toolName,
             args: part.toolInvocation.args,
           });
         }
-        // Note: dbMsg.role === 'tool' (tool results) are handled below by filtering
       });
-    } else if (typeof dbMsg.parts === 'string') { // Legacy or simple text
+    } else if (typeof dbMsg.parts === 'string') {
       textPartsAggregated.push(dbMsg.parts);
     }
+    
+    const baseSdkMessageProps = {
+      id: dbMsg.id,
+      createdAt: dbMsg.createdAt,
+      experimental_attachments: (dbMsg.attachments as any[]) ?? undefined,
+    };
 
     if (['user', 'system', 'data'].includes(currentRole)) {
       contentForSDK = textPartsAggregated.join('\n');
       sdkMessages.push({
-        id: dbMsg.id,
-        role: currentRole as ExpectedSDKMessageRole,
+        ...baseSdkMessageProps,
+        role: currentRole as ExpectedSDKMessageRole, // Assumes 'data' is valid if it comes from DB
         content: contentForSDK,
-        createdAt: dbMsg.createdAt,
       });
     } else if (currentRole === 'assistant') {
       if (toolCallParts.length > 0) {
-        const assistantContent: Array<SDKTextPart | SDKToolCallPart> = [];
+        const assistantContentParts: Array<SDKTextPart | SDKToolCallPart> = [];
         const aggregatedText = textPartsAggregated.join('\n').trim();
         if (aggregatedText) {
-          assistantContent.push({ type: 'text', text: aggregatedText });
+          assistantContentParts.push({ type: 'text', text: aggregatedText });
         }
-        assistantContent.push(...toolCallParts);
-        contentForSDK = assistantContent;
+        assistantContentParts.push(...toolCallParts);
+        contentForSDK = assistantContentParts;
       } else {
         contentForSDK = textPartsAggregated.join('\n');
       }
-      sdkMessages.push({
-        id: dbMsg.id,
-        role: 'assistant', // Explicitly 'assistant'
+      // No explicit cast to AssistantMessage here, let TypeScript infer
+      // if the constructed object matches the 'assistant' part of the SDKMessage union.
+      sdkMessages.push({ // This is line 111 now (approximately)
+        ...baseSdkMessageProps,
+        role: 'assistant',
         content: contentForSDK,
-        createdAt: dbMsg.createdAt,
-      } as AssistantMessage); // Cast to AssistantMessage if content is array of parts
+      });
     } else if (currentRole === 'tool') {
-      // Based on the error "Type '...' is not assignable to type '... | "data" | ...'",
-      // 'tool' is not an expected role for the `messages` array in experimental_streamAssistant.
-      // Tool results are typically sent back to the assistant run via a separate mechanism
-      // or handled by the SDK when it reports tool calls that need execution.
-      // For message history, we might have to omit these or transform them differently if critical.
-      // For now, filtering them out to match the expected type signature.
-      console.warn(`Filtering out DB message with role 'tool': ${dbMsg.id} as it's not directly supported in SDKMessage history for this call.`);
+      console.warn(`Filtering out DB message with role 'tool': ${dbMsg.id} as it's not directly supported in SDKMessage history for this call by current type signature.`);
     }
   });
 
@@ -209,11 +208,11 @@ export async function POST(request: Request) {
   await createStreamId({ streamId, chatId: id });
 
   const requestHints = geolocation(request) as RequestHints;
-  const openAIClient = myProvider.languageModel(selectedChatModel); // This should be your OpenAI client from @ai-sdk/openai
+  const openAIClient = myProvider.languageModel(selectedChatModel);
 
   const stream = createDataStream({
      execute: async (dataStream) => {
-      const result = openAIClient.experimental_streamAssistant({ // This is line 129
+      const result = openAIClient.experimental_streamAssistant({
         assistantId: process.env.OPENAI_ASSISTANT_ID!,
         system: systemPrompt({ selectedChatModel, requestHints }),
         messages: messagesForSDK,
@@ -241,7 +240,7 @@ export async function POST(request: Request) {
                         id: lastAssistantMessage.id,
                         chatId: id,
                         role: lastAssistantMessage.role,
-                        parts: lastAssistantMessage.parts as any[],
+                        parts: lastAssistantMessage.parts as any[], // These are SDK parts
                         attachments: (lastAssistantMessage.experimental_attachments as any[]) ?? [],
                         createdAt: lastAssistantMessage.createdAt ?? new Date(),
                       },
@@ -278,7 +277,7 @@ export async function POST(request: Request) {
   return new Response(stream);
 }
 
-// GET and DELETE handlers
+// GET and DELETE handlers (assuming they are correct from previous versions)
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const chatId = searchParams.get('chatId');
