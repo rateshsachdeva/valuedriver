@@ -211,7 +211,7 @@ await saveChat({
     execute: async (dataStream) => {
       /* ---- inside the execute: async (dataStream) => { … } block ---- */
       
-      const result = (openai as any).experimental_streamAssistant(
+      const result = await (openai as any).experimental_streamAssistant(
         {
           assistantId: process.env.OPENAI_ASSISTANT_ID!,
           instructions: systemPrompt({ selectedChatModel, requestHints }),
