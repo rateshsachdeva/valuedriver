@@ -8,7 +8,7 @@ import {
   type UIMessage,
   type Message as SDKMessage,
 } from 'ai';
-import { openai } from '@ai-sdk/openai';
+import { streamAssistant } from '@ai-sdk/openai';
 import { auth, type UserType } from '@/app/(auth)/auth';
 import {
   createStreamId,
