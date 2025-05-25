@@ -211,34 +211,31 @@ await saveChat({
     execute: async (dataStream) => {
       /* ---- inside the execute: async (dataStream) => { … } block ---- */
       
-      const result = await experimental_streamAssistant({
-        {
-          assistantId: process.env.OPENAI_ASSISTANT_ID!,
-          instructions: systemPrompt({ selectedChatModel, requestHints }),
-          messages: sdkMsgs,
-          transform: smoothStream({ chunking: 'word' }),
+       const result = await experimental_streamAssistant({
+        assistantId: process.env.OPENAI_ASSISTANT_ID!,
+        instructions: systemPrompt({ selectedChatModel, requestHints }),
+        messages: sdkMsgs,
+        transform: smoothStream({ chunking: 'word' }),
       
-          tools: {
-            getWeather,
-            createDocument: createDocument({ session, dataStream }),
-            updateDocument: updateDocument({ session, dataStream }),
-            requestSuggestions: requestSuggestions({ session, dataStream }),
-          },
+        tools: {
+          getWeather,
+          createDocument: createDocument({ session, dataStream }),
+          updateDocument: updateDocument({ session, dataStream }),
+          requestSuggestions: requestSuggestions({ session, dataStream }),
+        },
       
-          /* extra knobs the current typings don’t declare */
-          maxSteps: 5,
-          activeTools:
-            selectedChatModel === 'chat-model-reasoning'
-              ? []
-              : ['getWeather', 'createDocument', 'updateDocument', 'requestSuggestions'],
-          messageIdFn: generateUUID,
-          telemetry: isProductionEnvironment && { functionId: 'stream-assistant' },
+        maxSteps: 5,
+        activeTools:
+          selectedChatModel === 'chat-model-reasoning'
+            ? []
+            : ['getWeather', 'createDocument', 'updateDocument', 'requestSuggestions'],
+        messageIdFn: generateUUID,
+        telemetry: isProductionEnvironment && { functionId: 'stream-assistant' },
       
-          onFinish: async ({ response }: { response: any }) => {
-            /* … your existing save-to-DB logic … */
-          },
-        } as any,        //  ← cast the options object
-      );
+        onFinish: async ({ response }: { response: any }) => {
+          // You can insert your DB-saving logic here
+        },
+      } as any);
 
 
       result.consumeStream();
