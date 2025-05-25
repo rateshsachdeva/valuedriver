@@ -2,11 +2,11 @@ import {
   createDataStream,
   smoothStream,
   type UIMessage,
-  type Message as SDKMessage,
-  type ToolInvocation as SDKToolInvocation,
-  type ToolCallPart as SDKToolCallPart,
-  type TextPart as SDKTextPart,
-  type AssistantMessage, // Keep this for clarity if needed but avoid casting to it when pushing to SDKMessage[]
+  type Message as SDKMessage, // Main message type
+  // We are simplifying historical messages, so detailed part types might not be directly used in messagesForSDK
+  // type ToolInvocation as SDKToolInvocation,
+  // type ToolCallPart as SDKToolCallPart,
+  // type TextPart as SDKTextPart,
 } from 'ai';
 import { openai } from '@ai-sdk/openai';
 import { auth, type UserType } from '@/app/(auth)/auth';
@@ -59,32 +59,28 @@ function getStreamContext() {
   return globalStreamContext;
 }
 
+// Based on Vercel build error: Type '"user" | "system" | "assistant" | "tool"' is not assignable to type '"user" | "data" | "system" | "assistant"'.
+// This implies the SDKMessage in this context expects roles from the latter set.
 type ExpectedSDKMessageRole = 'user' | 'data' | 'system' | 'assistant';
 
 function transformDBMessagesToSDKMessages(dbMessages: DBMessage[], incomingUserMessage: UIMessage): SDKMessage[] {
   const sdkMessages: SDKMessage[] = [];
 
   dbMessages.forEach(dbMsg => {
-    const currentRole = dbMsg.role as string;
-    let contentForSDK: string | Array<SDKTextPart | SDKToolCallPart> = '';
-    const textPartsAggregated: string[] = [];
-    const toolCallParts: SDKToolCallPart[] = [];
+    const currentDbRole = dbMsg.role as string;
+    let concatenatedTextContent = '';
 
     if (Array.isArray(dbMsg.parts)) {
       dbMsg.parts.forEach((part: any) => {
         if (part.type === 'text' && typeof part.text === 'string') {
-          textPartsAggregated.push(part.text);
-        } else if (currentRole === 'assistant' && part.type === 'tool-invocation' && part.toolInvocation) {
-          toolCallParts.push({
-            type: 'tool-call',
-            toolCallId: part.toolInvocation.toolCallId || generateUUID(),
-            toolName: part.toolInvocation.toolName,
-            args: part.toolInvocation.args,
-          });
+          concatenatedTextContent += (concatenatedTextContent ? '\n' : '') + part.text;
         }
+        // Tool invocations from history are complex for experimental_streamAssistant's `messages` array.
+        // The assistant usually manages its own tool call history within a thread.
+        // For simplicity and to pass type checks based on errors, we focus on text content for history.
       });
-    } else if (typeof dbMsg.parts === 'string') {
-      textPartsAggregated.push(dbMsg.parts);
+    } else if (typeof dbMsg.parts === 'string') { // Legacy or simple text
+      concatenatedTextContent = dbMsg.parts;
     }
     
     const baseSdkMessageProps = {
@@ -93,37 +89,31 @@ function transformDBMessagesToSDKMessages(dbMessages: DBMessage[], incomingUserM
       experimental_attachments: (dbMsg.attachments as any[]) ?? undefined,
     };
 
-    if (['user', 'system', 'data'].includes(currentRole)) {
-      contentForSDK = textPartsAggregated.join('\n');
+    // Ensure the role is one of the expected types and content is always string
+    if (['user', 'system', 'assistant'].includes(currentDbRole)) {
       sdkMessages.push({
         ...baseSdkMessageProps,
-        role: currentRole as ExpectedSDKMessageRole, // Assumes 'data' is valid if it comes from DB
-        content: contentForSDK,
+        role: currentDbRole as 'user' | 'system' | 'assistant', // Narrowed down
+        content: concatenatedTextContent, // Always string
       });
-    } else if (currentRole === 'assistant') {
-      if (toolCallParts.length > 0) {
-        const assistantContentParts: Array<SDKTextPart | SDKToolCallPart> = [];
-        const aggregatedText = textPartsAggregated.join('\n').trim();
-        if (aggregatedText) {
-          assistantContentParts.push({ type: 'text', text: aggregatedText });
-        }
-        assistantContentParts.push(...toolCallParts);
-        contentForSDK = assistantContentParts;
-      } else {
-        contentForSDK = textPartsAggregated.join('\n');
-      }
-      // No explicit cast to AssistantMessage here, let TypeScript infer
-      // if the constructed object matches the 'assistant' part of the SDKMessage union.
-      sdkMessages.push({ // This is line 111 now (approximately)
-        ...baseSdkMessageProps,
-        role: 'assistant',
-        content: contentForSDK,
-      });
-    } else if (currentRole === 'tool') {
-      console.warn(`Filtering out DB message with role 'tool': ${dbMsg.id} as it's not directly supported in SDKMessage history for this call by current type signature.`);
+    } else if (currentDbRole === 'data' && ['user', 'data', 'system', 'assistant'].includes('data')) {
+        // If 'data' role is encountered and valid in ExpectedSDKMessageRole
+        sdkMessages.push({
+            ...baseSdkMessageProps,
+            role: 'data',
+            content: dbMsg.parts as unknown, // 'data' role content is 'unknown'
+        });
+    } else if (currentDbRole === 'tool') {
+      // Based on previous errors, 'tool' might not be directly assignable to SDKMessage.role here.
+      // If these are tool results, experimental_streamAssistant often expects them to be submitted
+      // to an active run, rather than as plain historical messages without context of a tool call.
+      console.warn(`Filtering out DB message with role 'tool' (ID: ${dbMsg.id}) for history passed to experimental_streamAssistant.`);
+    } else {
+      console.warn(`Unknown or unhandled role '${currentDbRole}' from DB message (ID: ${dbMsg.id}). Skipping.`);
     }
   });
 
+  // Add the current incoming user message
   let currentUserMessageContent = '';
   if (Array.isArray(incomingUserMessage.parts)) {
       currentUserMessageContent = incomingUserMessage.parts
@@ -137,7 +127,7 @@ function transformDBMessagesToSDKMessages(dbMessages: DBMessage[], incomingUserM
   sdkMessages.push({
     id: incomingUserMessage.id,
     role: 'user',
-    content: currentUserMessageContent,
+    content: currentUserMessageContent, // Content is string
     createdAt: new Date(incomingUserMessage.createdAt),
     experimental_attachments: incomingUserMessage.experimental_attachments
   });
@@ -212,10 +202,10 @@ export async function POST(request: Request) {
 
   const stream = createDataStream({
      execute: async (dataStream) => {
-      const result = openAIClient.experimental_streamAssistant({
+      const result = openAIClient.experimental_streamAssistant({ // Line 129 was here
         assistantId: process.env.OPENAI_ASSISTANT_ID!,
         system: systemPrompt({ selectedChatModel, requestHints }),
-        messages: messagesForSDK,
+        messages: messagesForSDK, // messagesForSDK now ensures content is string for these roles
         maxSteps: 5,
         experimental_activeTools:
           selectedChatModel === 'chat-model-reasoning'
@@ -234,13 +224,27 @@ export async function POST(request: Request) {
             try {
               const lastAssistantMessage = response.messages.filter(m => m.role === 'assistant').pop();
               if (lastAssistantMessage && lastAssistantMessage.id) {
+                 // The 'parts' from SDK response might be complex. Your DB expects a certain 'parts' structure.
+                 // This needs careful mapping if SDK 'parts' and DB 'parts' differ.
+                 // For simplicity, if DB expects a flat list of text/tool parts:
+                 let dbParts: any[] = [];
+                 if (typeof lastAssistantMessage.content === 'string') {
+                    dbParts.push({ type: 'text', text: lastAssistantMessage.content });
+                 } else if (Array.isArray(lastAssistantMessage.content)) {
+                    dbParts = lastAssistantMessage.content.map(part => {
+                        if (part.type === 'text') return { type: 'text', text: part.text };
+                        if (part.type === 'tool-call') return { type: 'tool-invocation', toolInvocation: part }; // Map to your DB 'tool-invocation'
+                        return part; // Or handle other types
+                    });
+                 }
+
                  await saveMessages({
                     messages: [
                       {
                         id: lastAssistantMessage.id,
                         chatId: id,
                         role: lastAssistantMessage.role,
-                        parts: lastAssistantMessage.parts as any[], // These are SDK parts
+                        parts: dbParts, 
                         attachments: (lastAssistantMessage.experimental_attachments as any[]) ?? [],
                         createdAt: lastAssistantMessage.createdAt ?? new Date(),
                       },
@@ -277,7 +281,7 @@ export async function POST(request: Request) {
   return new Response(stream);
 }
 
-// GET and DELETE handlers (assuming they are correct from previous versions)
+// GET and DELETE handlers
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const chatId = searchParams.get('chatId');
