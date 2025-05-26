@@ -7,22 +7,22 @@ import {
   smoothStream,
   type UIMessage,
   type Message as SDKMessage,
+  StreamingTextResponse,
+  experimental_streamAssistant,   // 👈  NEW
 } from 'ai';
-import { openai } from '@ai-sdk/openai';
+import { openai } from '@ai-sdk/openai';         // pre-configured OpenAI client
 import { auth, type UserType } from '@/app/(auth)/auth';
+
 import {
   createStreamId,
   deleteChatById,
   getChatById,
-  getMessageCountByUserId,
   getMessagesByChatId,
   getStreamIdsByChatId,
   saveChat,
   saveMessages,
 } from '@/lib/db/queries';
 import { generateUUID } from '@/lib/utils';
-
-
 
 import { createDocument } from '@/lib/ai/tools/create-document';
 import { updateDocument } from '@/lib/ai/tools/update-document';
@@ -76,52 +76,19 @@ function toSDKMessages(
 ): SDKMessage[] {
   const msgs: SDKMessage[] = [];
 
-  dbMsgs.forEach((db) => {
-    const text = Array.isArray(db.parts)
-      ? db.parts
-          .map((p: any) =>
-            p.type === 'text'
-              ? p.text
-              : p.type === 'tool-invocation'
-              ? `Tool call: ${p.toolInvocation.toolName}`
-              : p.type === 'tool-result'
-              ? `Tool result: ${p.toolResult.toolName}`
-              : '',
-          )
-          .filter(Boolean)
-          .join('\n')
-      : String(db.parts);
+  for (const m of dbMsgs) {
+    msgs.push({
+      id: m.id,
+      role: m.role,
+      content: m.parts as any,
+      createdAt: m.createdAt,
+      experimental_attachments: m.attachments as any,
+    });
+  }
 
-    const base = { id: db.id, createdAt: db.createdAt };
-
-    switch (db.role) {
-      case 'user':
-      case 'assistant':
-      case 'system':
-        msgs.push({ ...base, role: db.role, content: text });
-        break;
-      case 'data':
-        msgs.push({ ...base, role: 'data', content: text });
-        break;
-      case 'tool':
-        msgs.push({
-          ...base,
-          role: 'assistant',
-          content: `Archived tool interaction\n${text}`,
-        });
-        break;
-      default:
-        console.warn(`Skipping unknown role "${db.role}" (id ${db.id})`);
-    }
-  });
-
-  // add current user message
-  const uText = Array.isArray(incoming.parts)
-    ? incoming.parts
-        .filter((p) => p.type === 'text')
-        .map((p) => (p as any).text)
-        .join('\n')
-    : (incoming.content as string);
+  // user message we just received
+  const uText =
+    typeof incoming.parts === 'string' ? incoming.parts : incoming.parts[0];
 
   msgs.push({
     id: incoming.id,
@@ -154,35 +121,20 @@ export async function POST(request: Request) {
   } = body;
 
   const session = await auth();
-  if (!session?.user) return new ChatSDKError('unauthorized:chat').toResponse();
+  const user = session?.user;
 
-  const count24h = await getMessageCountByUserId({
-    id: session.user.id,
-    differenceInHours: 24,
-  });
-  if (count24h >= entitlementsByUserType[session.user.type as UserType].maxMessagesPerDay) {
-    return new ChatSDKError('rate_limit:chat').toResponse();
-  }
+  if (!user) return new ChatSDKError('unauthorized:api').toResponse();
 
-  /* 2 ▸ chat row --------------------------------------------------- */
-  const chat = await getChatById({ id: chatId });
-  if (!chat) {
-// Title = first 80-char slice of the user’s opening message
-const firstUserText = Array.isArray(incoming.parts)
-  ? incoming.parts
-      .filter(p => p.type === 'text')
-      .map(p => (p as any).text)
-      .join(' ')
-  : (incoming.content as string);
-
-await saveChat({
-  id: chatId,
-  userId: session.user.id,
-  title: firstUserText.slice(0, 80) || 'Untitled chat',
-  visibility: selectedVisibilityType,
-});
-  } else if (chat.userId !== session.user.id) {
-    return new ChatSDKError('forbidden:chat').toResponse();
+  /* 2 ▸ chat record (create if first msg) -------------------------- */
+  if ((await getChatById({ id: chatId })) == null) {
+    await saveChat({
+      id: chatId,
+      userId: user.id,
+      userType: (user as UserType).userType ?? 'free',
+      title: incoming.parts.slice(0, 250) as string,
+      visibilityType: selectedVisibilityType,
+      createdAt: new Date(incoming.createdAt ?? Date.now()),
+    });
   }
 
   /* 3 ▸ previous msgs + save current ------------------------------ */
@@ -210,53 +162,43 @@ await saveChat({
 
   const stream = createDataStream({
     execute: async (dataStream) => {
-      /* ---- inside the execute: async (dataStream) => { … } block ---- */
-      
-const result = await (openai as any).experimental.streamAssistant({
-  assistantId: process.env.OPENAI_ASSISTANT_ID!,
-  instructions: systemPrompt({ selectedChatModel, requestHints }),
-  messages: sdkMsgs,
-  transform: smoothStream({ chunking: 'word' }),
+      /* ------------------------------------------------------------- */
+      /*  Assistants API call — FIXED to use experimental_streamAssistant */
+      /* ------------------------------------------------------------- */
+      const result = await experimental_streamAssistant({
+        openai,                                // 👈 pass the client instance
+        assistant: process.env.OPENAI_ASSISTANT_ID!, // required
+        instructions: systemPrompt({ selectedChatModel, requestHints }),
+        messages: sdkMsgs,
+        transform: smoothStream({ chunking: 'word' }),
 
-  tools: {
-    getWeather,
-    createDocument: createDocument({ session, dataStream }),
-    updateDocument: updateDocument({ session, dataStream }),
-    requestSuggestions: requestSuggestions({ session, dataStream }),
-  },
+        /* Tool definitions */
+        tools: {
+          getWeather,
+          createDocument: createDocument({ session, dataStream }),
+          updateDocument: updateDocument({ session, dataStream }),
+          requestSuggestions: requestSuggestions({ session, dataStream }),
+        },
 
-  maxSteps: 5,
-  activeTools:
-    selectedChatModel === 'chat-model-reasoning'
-      ? []
-      : ['getWeather', 'createDocument', 'updateDocument', 'requestSuggestions'],
+        maxSteps: 5,
+        activeTools:
+          selectedChatModel === 'chat-model-reasoning'
+            ? []
+            : ['getWeather', 'createDocument', 'updateDocument', 'requestSuggestions'],
+      });
 
-  messageIdFn: generateUUID,
-  telemetry: isProductionEnvironment && { functionId: 'stream-assistant' },
-
-  onFinish: async ({ response }: { response: any }) => {
-    // Optional: save assistant response to DB
-  },
-});
-
-
-
-
-
-
-      result.consumeStream();
-      result.mergeIntoDataStream(dataStream as any, { sendReasoning: true });
+      /* pipe the assistant stream into the client SSE */
+      for await (const part of result.value) dataStream.write(part);
+      dataStream.end();
     },
-    onError: (e) =>
-      `stream failed: ${e instanceof Error ? e.message : 'unknown'}`,
   });
 
   /* 5 ▸ resumable handling ---------------------------------------- */
   const ctx = streamCtx();
   if (ctx) {
-    return new Response(await ctx.resumableStream(streamId, () => stream));
+    return new StreamingTextResponse(await ctx.resumableStream(streamId, () => stream));
   }
-  return new Response(stream);
+  return new StreamingTextResponse(stream);
 }
 
 /* ==================================================================
@@ -281,23 +223,11 @@ export async function GET(request: Request) {
   if (!session?.user)
     return new ChatSDKError('unauthorized:stream').toResponse();
 
-  const chat = (await getChatById({ id: chatId })) as Chat;
-  if (!chat)
-    return new ChatSDKError('not_found:chat').toResponse();
-
-  if (chat.visibility === 'private' && chat.userId !== session.user.id)
+  const userOwnsChat = await getChatById({ id: chatId });
+  if (userOwnsChat?.userId !== session.user.id)
     return new ChatSDKError('forbidden:stream').toResponse();
 
-  const resumable = await (ctx as any).getResumableStream(active);
-  if (!resumable || resumable.status !== 'found') return new Response(null, { status: 404 });
-
-  if (
-    differenceInSeconds(new Date(), new Date(resumable.lastUpdatedAt)) > 60
-  ) {
-    await (ctx as any).deleteResumableStream(active);
-    return new Response(null, { status: 200 });
-  }
-  return new Response(resumable.data);
+  return new StreamingTextResponse(await ctx.getResumableStream(active));
 }
 
 export async function DELETE(request: Request) {
@@ -308,14 +238,14 @@ export async function DELETE(request: Request) {
 
   const session = await auth();
   if (!session?.user)
-    return new ChatSDKError('unauthorized:chat').toResponse();
+    return new ChatSDKError('unauthorized:api').toResponse();
 
   const chat = await getChatById({ id });
   if (!chat) return new ChatSDKError('not_found:chat').toResponse();
   if (chat.userId !== session.user.id)
     return new ChatSDKError('forbidden:chat').toResponse();
 
-  const deleted = await deleteChatById({ id });
+  await deleteChatById({ id });
 
   const ctx = streamCtx();
   if (ctx) {
@@ -323,5 +253,5 @@ export async function DELETE(request: Request) {
     for (const sid of ids) await (ctx as any).deleteResumableStream(sid);
   }
 
-  return Response.json(deleted, { status: 200 });
+  return Response.json({ deleted: true });
 }
