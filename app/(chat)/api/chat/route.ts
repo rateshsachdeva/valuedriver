@@ -223,7 +223,7 @@ export async function GET(request: Request) {
   const chat = await getChatById({ id: chatId });
   if (chat?.userId !== session.user.id) return new ChatSDKError('forbidden:stream').toResponse();
 
-  const resumed = await ctx.getResumableStream(active);
+  const resumed = await ctx.resumableStream(active);
   if (!resumed) return new Response(null, { status: 404 });
 
   return createDataStreamResponse({ execute: (ds) => ds.merge(resumed) });
