@@ -121,8 +121,7 @@ export async function POST(request: Request) {
 
   const session = await auth();
   const user = session?.user;
-  if (!user)
-    return new ChatSDKError('unauthorized:api').toResponse();
+  if (!user) return new ChatSDKError('unauthorized:api').toResponse();
 
   /* ensure chat row exists */
   if ((await getChatById({ id: chatId })) == null) {
@@ -189,8 +188,7 @@ export async function POST(request: Request) {
       result.consumeStream();
       result.mergeIntoDataStream(ds as any, { sendReasoning: true });
     },
-    onError: (e) =>
-      `stream failed: ${e instanceof Error ? e.message : 'unknown'}`,
+    onError: (e) => `stream failed: ${e instanceof Error ? e.message : 'unknown'}`,
   });
 
   const ctx = streamCtx();
@@ -220,12 +218,10 @@ export async function GET(request: Request) {
   if (!active) return new Response(null, { status: 404 });
 
   const session = await auth();
-  if (!session?.user)
-    return new ChatSDKError('unauthorized:stream').toResponse();
+  if (!session?.user) return new ChatSDKError('unauthorized:stream').toResponse();
 
   const chat = await getChatById({ id: chatId });
-  if (chat?.userId !== session.user.id)
-    return new ChatSDKError('forbidden:stream').toResponse();
+  if (chat?.userId !== session.user.id) return new ChatSDKError('forbidden:stream').toResponse();
 
   const resumed = await ctx.getResumableStream(active);
   return createDataStreamResponse({ execute: (ds) => ds.merge(resumed) });
@@ -238,21 +234,24 @@ export async function GET(request: Request) {
 export async function DELETE(request: Request) {
   const { searchParams } = new URL(request.url);
   const id = searchParams.get('id');
-  if (!id)
-    return new ChatSDKError('bad_request:api', '"id" required').toResponse();
+  if (!id) return new ChatSDKError('bad_request:api', '"id" required').toResponse();
 
   const session = await auth();
-  if (!session?.user)
-    return new ChatSDKError('unauthorized:api').toResponse();
+  if (!session?.user) return new ChatSDKError('unauthorized:api').toResponse();
 
   const chat = await getChatById({ id });
-  if (!chat)
-    return new ChatSDKError('not_found:chat').toResponse();
-  if (chat.userId !== session.user.id)
-    return new ChatSDKError('forbidden:chat').toResponse();
+  if (!chat) return new ChatSDKError('not_found:chat').toResponse();
+  if (chat.userId !== session.user.id) return new ChatSDKError('forbidden:chat').toResponse();
 
   await deleteChatById({ id });
 
   const ctx = streamCtx();
   if (ctx) {
-    const ids = await getStreamIdsByChatId({ chatId
+    const ids = await getStreamIdsByChatId({ chatId: id });
+    for (const sid of ids) {
+      await (ctx as any).deleteResumableStream(sid);
+    }
+  }
+
+  return Response.json({ deleted: true });
+}
