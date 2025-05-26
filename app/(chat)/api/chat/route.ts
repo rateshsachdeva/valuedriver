@@ -10,9 +10,9 @@ import {
   createDataStreamResponse,
 } from 'ai';
 
-import { openai } from '@ai-sdk/openai'; // pre‑configured OpenAI client
+import { openai } from '@ai-sdk/openai';
 
-import { auth, type UserType } from '@/app/(auth)/auth';
+import { auth } from '@/app/(auth)/auth';
 import {
   createStreamId,
   deleteChatById,
@@ -28,7 +28,6 @@ import { createDocument } from '@/lib/ai/tools/create-document';
 import { updateDocument } from '@/lib/ai/tools/update-document';
 import { requestSuggestions } from '@/lib/ai/tools/request-suggestions';
 import { getWeather } from '@/lib/ai/tools/get-weather';
-
 
 import {
   postRequestBodySchema,
@@ -46,7 +45,7 @@ import { ChatSDKError } from '@/lib/errors';
 import { systemPrompt, type RequestHints } from '@/lib/ai/prompts';
 
 /* ------------------------------------------------------------------ */
-/*  constants & helpers                                               */
+/* constants & helpers                                                */
 /* ------------------------------------------------------------------ */
 
 export const maxDuration = 60; // seconds
@@ -85,12 +84,16 @@ function toSDKMessages(
     });
   }
 
-  const uText = typeof incoming.parts === 'string' ? incoming.parts : incoming.parts[0];
+  const uText =
+    typeof incoming.parts === 'string'
+      ? incoming.parts
+      : (incoming.parts[0] as any)?.text ?? '';
 
   msgs.push({
     id: incoming.id,
     role: 'user',
     content: uText as any,
+    createdAt: new Date(incoming.createdAt ?? Date.now()),
     experimental_attachments: incoming.experimental_attachments,
   });
 
@@ -98,8 +101,9 @@ function toSDKMessages(
 }
 
 /* ==================================================================
-   POST  /api/chat
+   POST /api/chat
    ================================================================== */
+
 export async function POST(request: Request) {
   let body: PostRequestBody;
   try {
@@ -108,24 +112,33 @@ export async function POST(request: Request) {
     return new ChatSDKError('bad_request:api', (e as Error).message).toResponse();
   }
 
-  const { id: chatId, message: incoming, selectedChatModel, selectedVisibilityType } = body;
+  const {
+    id: chatId,
+    message: incoming,
+    selectedChatModel,
+    selectedVisibilityType,
+  } = body;
 
   const session = await auth();
   const user = session?.user;
-  if (!user) return new ChatSDKError('unauthorized:api').toResponse();
+  if (!user)
+    return new ChatSDKError('unauthorized:api').toResponse();
 
+  /* ensure chat row exists */
   if ((await getChatById({ id: chatId })) == null) {
     await saveChat({
       id: chatId,
       userId: user.id,
-      title: ((typeof incoming.parts === 'string'
-        ? incoming.parts
-        : (incoming.parts[0] as any)?.text ?? '') as string).slice(0, 250),
+      title: (
+        typeof incoming.parts === 'string'
+          ? incoming.parts
+          : (incoming.parts[0] as any)?.text ?? ''
+      ).slice(0, 250),
       visibility: selectedVisibilityType,
-      createdAt: new Date(incoming.createdAt ?? Date.now()),
     });
   }
 
+  /* previous messages + save current */
   const prev = await getMessagesByChatId({ id: chatId });
   const sdkMsgs = toSDKMessages(prev, incoming);
 
@@ -142,13 +155,14 @@ export async function POST(request: Request) {
     ],
   });
 
+  /* assistant stream */
   const streamId = generateUUID();
   await createStreamId({ streamId, chatId });
 
   const requestHints = geolocation(request) as RequestHints;
 
   const stream = createDataStream({
-    execute: async (dataStream) => {
+    execute: async (ds) => {
       const result = await (openai as any).experimental.streamAssistant({
         assistantId: process.env.OPENAI_ASSISTANT_ID!,
         instructions: systemPrompt({ selectedChatModel, requestHints }),
@@ -156,21 +170,27 @@ export async function POST(request: Request) {
         transform: smoothStream({ chunking: 'word' }),
         tools: {
           getWeather,
-          createDocument: createDocument({ session, dataStream }),
-          updateDocument: updateDocument({ session, dataStream }),
-          requestSuggestions: requestSuggestions({ session, dataStream }),
+          createDocument: createDocument({ session, dataStream: ds }),
+          updateDocument: updateDocument({ session, dataStream: ds }),
+          requestSuggestions: requestSuggestions({ session, dataStream: ds }),
         },
         maxSteps: 5,
         activeTools:
           selectedChatModel === 'chat-model-reasoning'
             ? []
-            : ['getWeather', 'createDocument', 'updateDocument', 'requestSuggestions'],
+            : [
+                'getWeather',
+                'createDocument',
+                'updateDocument',
+                'requestSuggestions',
+              ],
       });
 
       result.consumeStream();
-      result.mergeIntoDataStream(dataStream as any, { sendReasoning: true });
+      result.mergeIntoDataStream(ds as any, { sendReasoning: true });
     },
-    onError: (e) => `stream failed: ${e instanceof Error ? e.message : 'unknown'}`,
+    onError: (e) =>
+      `stream failed: ${e instanceof Error ? e.message : 'unknown'}`,
   });
 
   const ctx = streamCtx();
@@ -183,12 +203,14 @@ export async function POST(request: Request) {
 }
 
 /* ==================================================================
-   GET  /api/chat
+   GET /api/chat
    ================================================================== */
+
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const chatId = searchParams.get('chatId');
-  if (!chatId) return new ChatSDKError('bad_request:api', '"chatId" required').toResponse();
+  if (!chatId)
+    return new ChatSDKError('bad_request:api', '"chatId" required').toResponse();
 
   const ctx = streamCtx();
   if (!ctx) return new Response(null, { status: 404 });
@@ -198,10 +220,12 @@ export async function GET(request: Request) {
   if (!active) return new Response(null, { status: 404 });
 
   const session = await auth();
-  if (!session?.user) return new ChatSDKError('unauthorized:stream').toResponse();
+  if (!session?.user)
+    return new ChatSDKError('unauthorized:stream').toResponse();
 
   const chat = await getChatById({ id: chatId });
-  if (chat?.userId !== session.user.id) return new ChatSDKError('forbidden:stream').toResponse();
+  if (chat?.userId !== session.user.id)
+    return new ChatSDKError('forbidden:stream').toResponse();
 
   const resumed = await ctx.getResumableStream(active);
   return createDataStreamResponse({ execute: (ds) => ds.merge(resumed) });
@@ -210,25 +234,25 @@ export async function GET(request: Request) {
 /* ==================================================================
    DELETE /api/chat
    ================================================================== */
+
 export async function DELETE(request: Request) {
   const { searchParams } = new URL(request.url);
   const id = searchParams.get('id');
-  if (!id) return new ChatSDKError('bad_request:api', '"id" required').toResponse();
+  if (!id)
+    return new ChatSDKError('bad_request:api', '"id" required').toResponse();
 
   const session = await auth();
-  if (!session?.user) return new ChatSDKError('unauthorized:api').toResponse();
+  if (!session?.user)
+    return new ChatSDKError('unauthorized:api').toResponse();
 
   const chat = await getChatById({ id });
-  if (!chat) return new ChatSDKError('not_found:chat').toResponse();
-  if (chat.userId !== session.user.id) return new ChatSDKError('forbidden:chat').toResponse();
+  if (!chat)
+    return new ChatSDKError('not_found:chat').toResponse();
+  if (chat.userId !== session.user.id)
+    return new ChatSDKError('forbidden:chat').toResponse();
 
   await deleteChatById({ id });
 
   const ctx = streamCtx();
   if (ctx) {
-    const ids = await getStreamIdsByChatId({ chatId: id });
-    for (const sid of ids) await (ctx as any).deleteResumableStream(sid);
-  }
-
-  return Response.json({ deleted: true });
-}
+    const ids = await getStreamIdsByChatId({ chatId
