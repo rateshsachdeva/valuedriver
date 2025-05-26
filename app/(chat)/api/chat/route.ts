@@ -119,7 +119,9 @@ export async function POST(request: Request) {
     await saveChat({
       id: chatId,
       userId: user.id,
-      title: (typeof incoming.parts === 'string' ? incoming.parts : incoming.parts[0]).slice(0, 250),
+      title: ((typeof incoming.parts === 'string'
+        ? incoming.parts
+        : (incoming.parts[0] as any)?.text ?? '') as string).slice(0, 250),
       visibility: selectedVisibilityType,
       createdAt: new Date(incoming.createdAt ?? Date.now()),
     });
