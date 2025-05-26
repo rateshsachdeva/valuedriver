@@ -10,9 +10,10 @@ import {
   createDataStreamResponse,
 } from 'ai';
 
-import OpenAI from 'openai';
-
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+import { openai } from '@ai-sdk/openai';
+import {
+  experimental_streamAssistant,
+} from 'ai';
 
 import { auth } from '@/app/(auth)/auth';
 import {
@@ -164,18 +165,26 @@ export async function POST(request: Request) {
 
   const stream = createDataStream({
     execute: async (ds) => {
-      const result = await openai.beta.chat.completions.streamAssistant({
-        assistant_id: process.env.OPENAI_ASSISTANT_ID!,
-        instructions: systemPrompt({ selectedChatModel, request_hints: requestHints }),
+      const result = await experimental_streamAssistant({
+        openai,
+        assistant: process.env.OPENAI_ASSISTANT_ID!,
+        instructions: systemPrompt({ selectedChatModel, requestHints }),
         messages: sdkMsgs,
+        transform: smoothStream({ chunking: 'word' }),
         tools: {
           getWeather,
           createDocument: createDocument({ session, dataStream: ds }),
           updateDocument: updateDocument({ session, dataStream: ds }),
           requestSuggestions: requestSuggestions({ session, dataStream: ds }),
         },
-        max_steps: 5,
+        maxSteps: 5,
       });
+
+      for await (const part of result.value) ds.write(part);
+      ds.end();
+    },
+    onError: (e) => `stream failed: ${e instanceof Error ? e.message : 'unknown'}`,
+  });
 
       for await (const chunk of result) ds.write(chunk.choices[0].delta?.content ?? '');
       ds.end();
