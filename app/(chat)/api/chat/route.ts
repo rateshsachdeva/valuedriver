@@ -29,8 +29,6 @@ import { updateDocument } from '@/lib/ai/tools/update-document';
 import { requestSuggestions } from '@/lib/ai/tools/request-suggestions';
 import { getWeather } from '@/lib/ai/tools/get-weather';
 
-import { isProductionEnvironment } from '@/lib/constants';
-import { entitlementsByUserType } from '@/lib/ai/entitlements';
 
 import {
   postRequestBodySchema,
@@ -92,7 +90,7 @@ function toSDKMessages(
   msgs.push({
     id: incoming.id,
     role: 'user',
-    content: uText,
+    content: uText as any,
     createdAt: new Date(incoming.createdAt ?? Date.now()),
     experimental_attachments: incoming.experimental_attachments,
   });
