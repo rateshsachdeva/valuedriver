@@ -43,7 +43,7 @@ import {
   type ResumableStreamContext,
 } from 'resumable-stream';
 import { after } from 'next/server';
-import type { Chat, DBMessage } from '@/lib/db/schema';
+import type { DBMessage } from '@/lib/db/schema';
 import { ChatSDKError } from '@/lib/errors';
 import { systemPrompt, type RequestHints } from '@/lib/ai/prompts';
 
@@ -87,9 +87,7 @@ function toSDKMessages(
     });
   }
 
-  // Convert incoming UIMessage to SDKMessage
-  const uText =
-    typeof incoming.parts === 'string' ? incoming.parts : incoming.parts[0];
+  const uText = typeof incoming.parts === 'string' ? incoming.parts : incoming.parts[0];
 
   msgs.push({
     id: incoming.id,
@@ -106,7 +104,6 @@ function toSDKMessages(
    POST  /api/chat
    ================================================================== */
 export async function POST(request: Request) {
-  /* 1 ▸ validate body & auth --------------------------------------- */
   let body: PostRequestBody;
   try {
     body = postRequestBodySchema.parse(await request.json());
@@ -114,18 +111,12 @@ export async function POST(request: Request) {
     return new ChatSDKError('bad_request:api', (e as Error).message).toResponse();
   }
 
-  const {
-    id: chatId,
-    message: incoming,
-    selectedChatModel,
-    selectedVisibilityType,
-  } = body;
+  const { id: chatId, message: incoming, selectedChatModel, selectedVisibilityType } = body;
 
   const session = await auth();
   const user = session?.user;
   if (!user) return new ChatSDKError('unauthorized:api').toResponse();
 
-  /* 2 ▸ ensure chat record exists --------------------------------- */
   if ((await getChatById({ id: chatId })) == null) {
     await saveChat({
       id: chatId,
@@ -137,7 +128,6 @@ export async function POST(request: Request) {
     });
   }
 
-  /* 3 ▸ fetch previous msgs & persist current ---------------------- */
   const prev = await getMessagesByChatId({ id: chatId });
   const sdkMsgs = toSDKMessages(prev, incoming);
 
@@ -154,7 +144,6 @@ export async function POST(request: Request) {
     ],
   });
 
-  /* 4 ▸ assistant stream ------------------------------------------ */
   const streamId = generateUUID();
   await createStreamId({ streamId, chatId });
 
@@ -162,7 +151,6 @@ export async function POST(request: Request) {
 
   const stream = createDataStream({
     execute: async (dataStream) => {
-      // ▲  Use the OpenAI helper from the Node SDK (still experimental)
       const result = await (openai as any).experimental.streamAssistant({
         assistantId: process.env.OPENAI_ASSISTANT_ID!,
         instructions: systemPrompt({ selectedChatModel, requestHints }),
@@ -179,21 +167,14 @@ export async function POST(request: Request) {
           selectedChatModel === 'chat-model-reasoning'
             ? []
             : ['getWeather', 'createDocument', 'updateDocument', 'requestSuggestions'],
-        messageIdFn: generateUUID,
-        telemetry: isProductionEnvironment && { functionId: 'stream-assistant' },
-        onFinish: async () => {
-          // Optional: persist assistant response here
-        },
       });
 
-      // pump assistant parts into our DataStream
       result.consumeStream();
       result.mergeIntoDataStream(dataStream as any, { sendReasoning: true });
     },
     onError: (e) => `stream failed: ${e instanceof Error ? e.message : 'unknown'}`,
   });
 
-  /* 5 ▸ return stream (resumable if enabled) ----------------------- */
   const ctx = streamCtx();
   if (ctx) {
     const resumed = await ctx.resumableStream(streamId, () => stream);
@@ -204,13 +185,12 @@ export async function POST(request: Request) {
 }
 
 /* ==================================================================
-   GET  /api/chat (resume an active stream)
+   GET  /api/chat
    ================================================================== */
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const chatId = searchParams.get('chatId');
-  if (!chatId)
-    return new ChatSDKError('bad_request:api', '"chatId" required').toResponse();
+  if (!chatId) return new ChatSDKError('bad_request:api', '"chatId" required').toResponse();
 
   const ctx = streamCtx();
   if (!ctx) return new Response(null, { status: 404 });
@@ -220,25 +200,37 @@ export async function GET(request: Request) {
   if (!active) return new Response(null, { status: 404 });
 
   const session = await auth();
-  if (!session?.user)
-    return new ChatSDKError('unauthorized:stream').toResponse();
+  if (!session?.user) return new ChatSDKError('unauthorized:stream').toResponse();
 
   const chat = await getChatById({ id: chatId });
-  if (chat?.userId !== session.user.id)
-    return new ChatSDKError('forbidden:stream').toResponse();
+  if (chat?.userId !== session.user.id) return new ChatSDKError('forbidden:stream').toResponse();
 
   const resumed = await ctx.getResumableStream(active);
   return createDataStreamResponse({ execute: (ds) => ds.merge(resumed) });
 }
 
 /* ==================================================================
-   DELETE /api/chat (remove chat + associated streams)
+   DELETE /api/chat
    ================================================================== */
 export async function DELETE(request: Request) {
   const { searchParams } = new URL(request.url);
   const id = searchParams.get('id');
-  if (!id)
-    return new ChatSDKError('bad_request:api', '"id" required').toResponse();
+  if (!id) return new ChatSDKError('bad_request:api', '"id" required').toResponse();
 
   const session = await auth();
-  if (!session?.
+  if (!session?.user) return new ChatSDKError('unauthorized:api').toResponse();
+
+  const chat = await getChatById({ id });
+  if (!chat) return new ChatSDKError('not_found:chat').toResponse();
+  if (chat.userId !== session.user.id) return new ChatSDKError('forbidden:chat').toResponse();
+
+  await deleteChatById({ id });
+
+  const ctx = streamCtx();
+  if (ctx) {
+    const ids = await getStreamIdsByChatId({ chatId: id });
+    for (const sid of ids) await (ctx as any).deleteResumableStream(sid);
+  }
+
+  return Response.json({ deleted: true });
+}
