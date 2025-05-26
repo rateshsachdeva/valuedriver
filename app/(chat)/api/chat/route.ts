@@ -8,7 +8,6 @@ import {
   type UIMessage,
   type Message as SDKMessage,
   createDataStreamResponse,
-  experimental_streamAssistant,
 } from 'ai';
 
 import { openai } from '@ai-sdk/openai'; // pre‑configured OpenAI client
@@ -163,9 +162,9 @@ export async function POST(request: Request) {
 
   const stream = createDataStream({
     execute: async (dataStream) => {
-      const result = await experimental_streamAssistant({
-        openai,
-        assistant: process.env.OPENAI_ASSISTANT_ID!,
+      // ▲  Use the OpenAI helper from the Node SDK (still experimental)
+      const result = await (openai as any).experimental.streamAssistant({
+        assistantId: process.env.OPENAI_ASSISTANT_ID!,
         instructions: systemPrompt({ selectedChatModel, requestHints }),
         messages: sdkMsgs,
         transform: smoothStream({ chunking: 'word' }),
@@ -179,17 +178,19 @@ export async function POST(request: Request) {
         activeTools:
           selectedChatModel === 'chat-model-reasoning'
             ? []
-            : [
-                'getWeather',
-                'createDocument',
-                'updateDocument',
-                'requestSuggestions',
-              ],
+            : ['getWeather', 'createDocument', 'updateDocument', 'requestSuggestions'],
+        messageIdFn: generateUUID,
+        telemetry: isProductionEnvironment && { functionId: 'stream-assistant' },
+        onFinish: async () => {
+          // Optional: persist assistant response here
+        },
       });
 
-      for await (const part of result.value) dataStream.write(part);
-      dataStream.end();
+      // pump assistant parts into our DataStream
+      result.consumeStream();
+      result.mergeIntoDataStream(dataStream as any, { sendReasoning: true });
     },
+    onError: (e) => `stream failed: ${e instanceof Error ? e.message : 'unknown'}`,
   });
 
   /* 5 ▸ return stream (resumable if enabled) ----------------------- */
@@ -240,21 +241,4 @@ export async function DELETE(request: Request) {
     return new ChatSDKError('bad_request:api', '"id" required').toResponse();
 
   const session = await auth();
-  if (!session?.user)
-    return new ChatSDKError('unauthorized:api').toResponse();
-
-  const chat = await getChatById({ id });
-  if (!chat) return new ChatSDKError('not_found:chat').toResponse();
-  if (chat.userId !== session.user.id)
-    return new ChatSDKError('forbidden:chat').toResponse();
-
-  await deleteChatById({ id });
-
-  const ctx = streamCtx();
-  if (ctx) {
-    const ids = await getStreamIdsByChatId({ chatId: id });
-    for (const sid of ids) await (ctx as any).deleteResumableStream(sid);
-  }
-
-  return Response.json({ deleted: true });
-}
+  if (!session?.
