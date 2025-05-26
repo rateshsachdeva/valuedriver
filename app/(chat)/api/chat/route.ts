@@ -91,7 +91,6 @@ function toSDKMessages(
     id: incoming.id,
     role: 'user',
     content: uText as any,
-    createdAt: new Date(incoming.createdAt ?? Date.now()),
     experimental_attachments: incoming.experimental_attachments,
   });
 
