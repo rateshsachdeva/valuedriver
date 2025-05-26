@@ -1,5 +1,5 @@
 /* ---------------------------------------------------------------------
-   app/(chat)/api/chat/route.ts • Edge runtime • Assistants API (AI SDK v4)
+   app/(chat)/api/chat/route.ts • Edge runtime • OpenAI SDK 5 beta
    --------------------------------------------------------------------- */
 
 import {
@@ -10,7 +10,9 @@ import {
   createDataStreamResponse,
 } from 'ai';
 
-import { openai } from '@ai-sdk/openai';
+import OpenAI from 'openai';
+
+const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 import { auth } from '@/app/(auth)/auth';
 import {
@@ -162,38 +164,28 @@ export async function POST(request: Request) {
 
   const stream = createDataStream({
     execute: async (ds) => {
-      const result = await (openai as any).experimental.streamAssistant({
-        assistantId: process.env.OPENAI_ASSISTANT_ID!,
-        instructions: systemPrompt({ selectedChatModel, requestHints }),
+      const result = await openai.beta.chat.completions.streamAssistant({
+        assistant_id: process.env.OPENAI_ASSISTANT_ID!,
+        instructions: systemPrompt({ selectedChatModel, request_hints: requestHints }),
         messages: sdkMsgs,
-        transform: smoothStream({ chunking: 'word' }),
         tools: {
           getWeather,
           createDocument: createDocument({ session, dataStream: ds }),
           updateDocument: updateDocument({ session, dataStream: ds }),
           requestSuggestions: requestSuggestions({ session, dataStream: ds }),
         },
-        maxSteps: 5,
-        activeTools:
-          selectedChatModel === 'chat-model-reasoning'
-            ? []
-            : [
-                'getWeather',
-                'createDocument',
-                'updateDocument',
-                'requestSuggestions',
-              ],
+        max_steps: 5,
       });
 
-      result.consumeStream();
-      result.mergeIntoDataStream(ds as any, { sendReasoning: true });
+      for await (const chunk of result) ds.write(chunk.choices[0].delta?.content ?? '');
+      ds.end();
     },
     onError: (e) => `stream failed: ${e instanceof Error ? e.message : 'unknown'}`,
   });
 
   const ctx = streamCtx();
   if (ctx) {
-    const resumed = await ctx.resumableStream(streamId, () => stream);
+    const resumed = await (ctx as any).resumableStream(streamId, () => stream);
     return createDataStreamResponse({ execute: (ds: any) => ds.merge(resumed as any) });
   }
 
@@ -255,5 +247,4 @@ export async function DELETE(request: Request) {
     }
   }
 
-  return Response.json({ deleted: true });
-}
+  return Response.json({ deleted
