@@ -80,7 +80,7 @@ function toSDKMessages(
   for (const m of dbMsgs) {
     msgs.push({
       id: m.id,
-      role: m.role,
+      role: m.role as 'user' | 'assistant' | 'system' | 'data',
       content: m.parts as any,
       createdAt: m.createdAt,
       experimental_attachments: m.attachments as any,
