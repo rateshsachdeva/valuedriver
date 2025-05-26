@@ -1,5 +1,5 @@
 /* ---------------------------------------------------------------------
-   app/(chat)/api/chat/route.ts        •  Edge runtime  •  Assistants API
+   app/(chat)/api/chat/route.ts • Edge runtime • Assistants API (AI SDK v4)
    --------------------------------------------------------------------- */
 
 import {
@@ -7,12 +7,13 @@ import {
   smoothStream,
   type UIMessage,
   type Message as SDKMessage,
-  StreamingTextResponse,
-  experimental_streamAssistant,   // 👈  NEW
+  createDataStreamResponse,
+  experimental_streamAssistant,
 } from 'ai';
-import { openai } from '@ai-sdk/openai';         // pre-configured OpenAI client
-import { auth, type UserType } from '@/app/(auth)/auth';
 
+import { openai } from '@ai-sdk/openai'; // pre‑configured OpenAI client
+
+import { auth, type UserType } from '@/app/(auth)/auth';
 import {
   createStreamId,
   deleteChatById,
@@ -44,7 +45,6 @@ import {
 } from 'resumable-stream';
 import { after } from 'next/server';
 import type { Chat, DBMessage } from '@/lib/db/schema';
-import { differenceInSeconds } from 'date-fns';
 import { ChatSDKError } from '@/lib/errors';
 import { systemPrompt, type RequestHints } from '@/lib/ai/prompts';
 
@@ -52,7 +52,7 @@ import { systemPrompt, type RequestHints } from '@/lib/ai/prompts';
 /*  constants & helpers                                               */
 /* ------------------------------------------------------------------ */
 
-export const maxDuration = 60;
+export const maxDuration = 60; // seconds
 let globalStreamCtx: ResumableStreamContext | null = null;
 
 function streamCtx() {
@@ -62,7 +62,9 @@ function streamCtx() {
     } catch (e: any) {
       if (e.message?.includes('REDIS_URL')) {
         console.log('Resumable streams disabled (missing REDIS_URL)');
-      } else console.error(e);
+      } else {
+        console.error(e);
+      }
     }
   }
   return globalStreamCtx;
@@ -86,7 +88,7 @@ function toSDKMessages(
     });
   }
 
-  // user message we just received
+  // Convert incoming UIMessage to SDKMessage
   const uText =
     typeof incoming.parts === 'string' ? incoming.parts : incoming.parts[0];
 
@@ -105,7 +107,7 @@ function toSDKMessages(
    POST  /api/chat
    ================================================================== */
 export async function POST(request: Request) {
-  /* 1 ▸ body & auth ------------------------------------------------ */
+  /* 1 ▸ validate body & auth --------------------------------------- */
   let body: PostRequestBody;
   try {
     body = postRequestBodySchema.parse(await request.json());
@@ -122,10 +124,9 @@ export async function POST(request: Request) {
 
   const session = await auth();
   const user = session?.user;
-
   if (!user) return new ChatSDKError('unauthorized:api').toResponse();
 
-  /* 2 ▸ chat record (create if first msg) -------------------------- */
+  /* 2 ▸ ensure chat record exists --------------------------------- */
   if ((await getChatById({ id: chatId })) == null) {
     await saveChat({
       id: chatId,
@@ -137,7 +138,7 @@ export async function POST(request: Request) {
     });
   }
 
-  /* 3 ▸ previous msgs + save current ------------------------------ */
+  /* 3 ▸ fetch previous msgs & persist current ---------------------- */
   const prev = await getMessagesByChatId({ id: chatId });
   const sdkMsgs = toSDKMessages(prev, incoming);
 
@@ -162,50 +163,48 @@ export async function POST(request: Request) {
 
   const stream = createDataStream({
     execute: async (dataStream) => {
-      /* ------------------------------------------------------------- */
-      /*  Assistants API call — FIXED to use experimental_streamAssistant */
-      /* ------------------------------------------------------------- */
       const result = await experimental_streamAssistant({
-        openai,                                // 👈 pass the client instance
-        assistant: process.env.OPENAI_ASSISTANT_ID!, // required
+        openai,
+        assistant: process.env.OPENAI_ASSISTANT_ID!,
         instructions: systemPrompt({ selectedChatModel, requestHints }),
         messages: sdkMsgs,
         transform: smoothStream({ chunking: 'word' }),
-
-        /* Tool definitions */
         tools: {
           getWeather,
           createDocument: createDocument({ session, dataStream }),
           updateDocument: updateDocument({ session, dataStream }),
           requestSuggestions: requestSuggestions({ session, dataStream }),
         },
-
         maxSteps: 5,
         activeTools:
           selectedChatModel === 'chat-model-reasoning'
             ? []
-            : ['getWeather', 'createDocument', 'updateDocument', 'requestSuggestions'],
+            : [
+                'getWeather',
+                'createDocument',
+                'updateDocument',
+                'requestSuggestions',
+              ],
       });
 
-      /* pipe the assistant stream into the client SSE */
       for await (const part of result.value) dataStream.write(part);
       dataStream.end();
     },
   });
 
-  /* 5 ▸ resumable handling ---------------------------------------- */
+  /* 5 ▸ return stream (resumable if enabled) ----------------------- */
   const ctx = streamCtx();
   if (ctx) {
-    return new StreamingTextResponse(await ctx.resumableStream(streamId, () => stream));
+    const resumed = await ctx.resumableStream(streamId, () => stream);
+    return createDataStreamResponse({ execute: (ds) => ds.merge(resumed) });
   }
-  return new StreamingTextResponse(stream);
+
+  return createDataStreamResponse({ execute: (ds) => ds.merge(stream) });
 }
 
 /* ==================================================================
-   GET /api/chat           – unchanged
-   DELETE /api/chat        – unchanged
+   GET  /api/chat (resume an active stream)
    ================================================================== */
-
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const chatId = searchParams.get('chatId');
@@ -223,13 +222,17 @@ export async function GET(request: Request) {
   if (!session?.user)
     return new ChatSDKError('unauthorized:stream').toResponse();
 
-  const userOwnsChat = await getChatById({ id: chatId });
-  if (userOwnsChat?.userId !== session.user.id)
+  const chat = await getChatById({ id: chatId });
+  if (chat?.userId !== session.user.id)
     return new ChatSDKError('forbidden:stream').toResponse();
 
-  return new StreamingTextResponse(await ctx.getResumableStream(active));
+  const resumed = await ctx.getResumableStream(active);
+  return createDataStreamResponse({ execute: (ds) => ds.merge(resumed) });
 }
 
+/* ==================================================================
+   DELETE /api/chat (remove chat + associated streams)
+   ================================================================== */
 export async function DELETE(request: Request) {
   const { searchParams } = new URL(request.url);
   const id = searchParams.get('id');
